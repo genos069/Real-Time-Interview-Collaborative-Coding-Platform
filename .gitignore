@@ -1,0 +1,19 @@
+# IntelliJ
+.idea/
+
+# Frontend
+Client/node_modules/
+Client/dist/
+
+# Vite cache
+Client/node_modules/.vite/
+
+# Backend
+Server/target/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
