@@ -41,7 +41,7 @@ export default function Auth() {
               <Video className="w-4.5 h-4.5 text-[#0d1b2a]" />
             </div>
             <span className="text-white text-xl" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 600 }}>
-              InterviewAI
+              CodeGear
             </span>
           </Link>
         </div>
@@ -74,15 +74,15 @@ export default function Auth() {
           <div className="grid grid-cols-3 gap-4">
             {(role === "interviewer"
               ? [
-                  { value: "12k+", label: "Interviews conducted" },
-                  { value: "4.8×", label: "Faster hiring" },
-                  { value: "93%", label: "Team satisfaction" },
-                ]
+                { value: "12k+", label: "Interviews conducted" },
+                { value: "4.8×", label: "Faster hiring" },
+                { value: "93%", label: "Team satisfaction" },
+              ]
               : [
-                  { value: "50k+", label: "Mock sessions done" },
-                  { value: "78%", label: "Offer success rate" },
-                  { value: "4.9★", label: "User rating" },
-                ]
+                { value: "50k+", label: "Mock sessions done" },
+                { value: "78%", label: "Offer success rate" },
+                { value: "4.9★", label: "User rating" },
+              ]
             ).map(({ value, label }) => (
               <div key={label} className="bg-white/5 border border-white/8 rounded-xl p-4">
                 <div
@@ -102,7 +102,7 @@ export default function Auth() {
           <p className="text-white/60 text-sm leading-relaxed mb-4">
             {role === "interviewer"
               ? "\"The AI summary cuts my post-interview write-up from 30 minutes to 5. Our team's calibration is the best it's ever been.\""
-              : "\"After 8 mock rounds with InterviewAI, I walked into my Meta interview feeling genuinely prepared. Offer in hand.\""
+              : "\"After 8 mock rounds with CodeGear, I walked into my Meta interview feeling genuinely prepared. Offer in hand.\""
             }
           </p>
           <div className="flex items-center gap-3">
@@ -126,7 +126,7 @@ export default function Auth() {
               <div className="w-8 h-8 rounded-lg bg-[#00bfa6] flex items-center justify-center">
                 <Video className="w-4 h-4 text-[#0d1b2a]" />
               </div>
-              <span className="text-[#0d1b2a] text-lg" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 600 }}>InterviewAI</span>
+              <span className="text-[#0d1b2a] text-lg" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 600 }}>CodeGear</span>
             </Link>
             <span
               className={`text-xs px-3 py-1 rounded-full border ${roleBgLight} ${roleColor}`}
@@ -151,11 +151,10 @@ export default function Auth() {
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className={`flex-1 py-2.5 rounded-lg text-sm transition-all ${
-                  tab === t
+                className={`flex-1 py-2.5 rounded-lg text-sm transition-all ${tab === t
                     ? "bg-white text-[#0d1b2a] shadow-sm"
                     : "text-[#4a6080] hover:text-[#0d1b2a]"
-                }`}
+                  }`}
                 style={{ fontWeight: tab === t ? 600 : 400 }}
               >
                 {t === "login" ? "Sign In" : "Create Account"}

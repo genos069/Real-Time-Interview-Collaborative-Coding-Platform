@@ -22,7 +22,7 @@ export function PortalCards() {
             className="text-[#4a6080] mt-4 max-w-xl mx-auto"
             style={{ fontFamily: "'DM Sans', sans-serif" }}
           >
-            Whether you're preparing for your dream job or evaluating top talent, InterviewAI has a dedicated portal built for you.
+            Whether you're preparing for your dream job or evaluating top talent, CodeGear has a dedicated portal built for you.
           </p>
         </div>
 
@@ -59,7 +59,7 @@ export function PortalCards() {
               </p>
 
               <ul className="space-y-2.5 mb-8">
-                {["Mock interviews with AI feedback", "Curated question banks by role", "Progress dashboard & reports", "Schedule real interviews"].map((item) => (
+                {["Mock interviews with AI feedback", "Curated question banks", "Progress dashboard & reports"].map((item) => (
                   <li key={item} className="flex items-center gap-2.5 text-white/60 text-sm" style={{ fontFamily: "'DM Sans', sans-serif" }}>
                     <div className="w-4 h-4 rounded-full bg-[#00bfa6]/20 border border-[#00bfa6]/40 flex items-center justify-center shrink-0">
                       <div className="w-1.5 h-1.5 rounded-full bg-[#00bfa6]" />
@@ -111,7 +111,7 @@ export function PortalCards() {
               </p>
 
               <ul className="space-y-2.5 mb-8">
-                {["Build custom interview kits", "Collaborative evaluation rubrics", "AI-assisted candidate summaries", "Team calendar & scheduling"].map((item) => (
+                {["Build custom interview kits", "Collaborative evaluation rubrics", "Room creation & scheduling"].map((item) => (
                   <li key={item} className="flex items-center gap-2.5 text-[#4a6080] text-sm" style={{ fontFamily: "'DM Sans', sans-serif" }}>
                     <div className="w-4 h-4 rounded-full bg-[#0d1b2a]/8 border border-[#0d1b2a]/20 flex items-center justify-center shrink-0">
                       <div className="w-1.5 h-1.5 rounded-full bg-[#0d1b2a]" />

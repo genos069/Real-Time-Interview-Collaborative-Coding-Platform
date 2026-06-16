@@ -1,6 +1,24 @@
 import { ArrowRight, Play, Star } from "lucide-react";
+import Typed from 'typed.js';
+import { useEffect } from 'react';
+
+
 
 export function Hero() {
+  useEffect(() => {
+    const typed = new Typed('#element', {
+      strings: [
+        'Hire Smarter.',
+        '<span style="color:#00bfa6">Perform Better.</span>'
+      ],
+      contentType: 'html',
+      typeSpeed: 50,
+      backSpeed: 70,
+      loop: true,
+    });
+
+    return () => typed.destroy();
+  }, []);
   return (
     <section className="relative min-h-screen bg-[#0d1b2a] flex items-center overflow-hidden pt-16">
       {/* Background geometric elements */}
@@ -32,18 +50,17 @@ export function Hero() {
           </div>
 
           <h1
-            className="text-white mb-6 leading-tight"
-            style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700, fontSize: "clamp(2.25rem, 5vw, 3.75rem)", lineHeight: 1.15 }}
-          >
-            Hire Smarter.{" "}
-            <span className="text-[#00bfa6]">Prepare Confidently.</span>
+            className="text-white mb-6 leading-tight whitespace-nowrap "
+            style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 600, fontSize: "clamp(2.25rem, 5vw, 3.75rem)", lineHeight: 1.15 }}
+          ><span id="element" >
+            </span>
           </h1>
 
           <p
             className="text-white/60 text-lg mb-10 max-w-xl leading-relaxed"
             style={{ fontFamily: "'DM Sans', sans-serif", fontWeight: 400 }}
           >
-            InterviewAI brings candidates and interviewers together in a structured, AI-powered virtual environment. Run technical interviews, assess soft skills, and land the right role — all in one platform.
+            CodeGear brings candidates and interviewers together in a structured, AI-powered virtual environment. Run technical interviews, assess soft skills, and land the right role — all in one platform.
           </p>
 
           <div className="flex flex-wrap gap-4 mb-12">

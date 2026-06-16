@@ -1,6 +1,6 @@
 const testimonials = [
   {
-    quote: "InterviewAI's mock sessions were spot-on. I practiced 12 rounds and landed my Google offer in 3 weeks.",
+    quote: "CodeGear's mock sessions were spot-on. I practiced 12 rounds and landed my Google offer in 3 weeks.",
     name: "Arjun Mehta",
     role: "Software Engineer · Google",
     initials: "AM",

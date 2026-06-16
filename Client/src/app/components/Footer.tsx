@@ -11,7 +11,7 @@ export function Footer() {
                 <Video className="w-4 h-4 text-[#0d1b2a]" />
               </div>
               <span style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 600 }} className="text-white text-lg">
-                InterviewAI
+                CodeGear
               </span>
             </div>
             <p className="text-white/40 text-sm leading-relaxed" style={{ fontFamily: "'DM Sans', sans-serif" }}>
@@ -39,7 +39,7 @@ export function Footer() {
 
         <div className="border-t border-white/8 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
           <p className="text-white/30 text-xs" style={{ fontFamily: "'DM Sans', sans-serif" }}>
-            © 2026 InterviewAI. All rights reserved.
+            © 2026 CodeGear. All rights reserved.
           </p>
           <p className="text-white/30 text-xs" style={{ fontFamily: "'DM Sans', sans-serif" }}>
             SOC 2 Type II · GDPR Compliant · ISO 27001

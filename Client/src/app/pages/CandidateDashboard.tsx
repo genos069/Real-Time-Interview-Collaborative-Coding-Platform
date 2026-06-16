@@ -59,8 +59,8 @@ const mockSessions = [
 
 const rooms = [
   { id: "R-4821", title: "Google L5 — Technical", host: "Sarah (Interviewer)", date: "Jun 16, 2026 · 3:00 PM", status: "upcoming", duration: "60 min" },
-  { id: "R-3390", title: "AI Mock — System Design", host: "InterviewAI Bot", date: "Jun 12, 2026 · 11:00 AM", status: "completed", duration: "55 min" },
-  { id: "R-2711", title: "Behavioral Practice", host: "InterviewAI Bot", date: "Jun 10, 2026 · 2:00 PM", status: "completed", duration: "32 min" },
+  { id: "R-3390", title: "AI Mock — System Design", host: "CodeGear Bot", date: "Jun 12, 2026 · 11:00 AM", status: "completed", duration: "55 min" },
+  { id: "R-2711", title: "Behavioral Practice", host: "CodeGear Bot", date: "Jun 10, 2026 · 2:00 PM", status: "completed", duration: "32 min" },
   { id: "R-5103", title: "Stripe SDE2 — Technical", host: "Marcus (Interviewer)", date: "Jun 20, 2026 · 4:30 PM", status: "upcoming", duration: "60 min" },
 ];
 
@@ -182,9 +182,8 @@ function PracticeSection() {
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`px-4 py-1.5 rounded-full text-sm border transition-all ${
-              filter === f ? "bg-[#0d1b2a] text-white border-[#0d1b2a]" : "bg-white text-[#4a6080] border-[#0d1b2a]/12 hover:border-[#0d1b2a]/25"
-            }`}
+            className={`px-4 py-1.5 rounded-full text-sm border transition-all ${filter === f ? "bg-[#0d1b2a] text-white border-[#0d1b2a]" : "bg-white text-[#4a6080] border-[#0d1b2a]/12 hover:border-[#0d1b2a]/25"
+              }`}
             style={{ fontWeight: filter === f ? 600 : 400 }}
           >
             {f}

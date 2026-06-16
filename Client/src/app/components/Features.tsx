@@ -36,7 +36,7 @@ const features = [
 export function Features() {
   return (
     <section className="bg-[#f0f4f8] py-28">
-      <div className="max-w-7xl mx-auto px-6">
+      <div className="max-w-7xl mx-auto px-6" id="features">
         <div className="text-center mb-16">
           <span
             className="text-[#00bfa6] text-sm uppercase tracking-widest"
@@ -54,7 +54,7 @@ export function Features() {
             className="text-[#4a6080] mt-4 max-w-2xl mx-auto text-lg"
             style={{ fontFamily: "'DM Sans', sans-serif" }}
           >
-            From the first technical question to the final offer, InterviewAI handles every step with precision.
+            From the first technical question to the final offer, CodeGear handles every step with precision.
           </p>
         </div>
 
