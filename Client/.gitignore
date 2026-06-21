@@ -1,5 +1,4 @@
 node_modules/
 vite/
-postcss.config.mjs
 dist
 .env
