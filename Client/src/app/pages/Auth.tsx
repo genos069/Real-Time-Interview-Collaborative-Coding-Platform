@@ -6,7 +6,7 @@ import {
   registerUser,
   loginInterviewer,
   registerInterviewer,
-} from "../../services/authServices.js";
+} from "../../services/authServices";
 
 type Tab = "login" | "signup";
 
