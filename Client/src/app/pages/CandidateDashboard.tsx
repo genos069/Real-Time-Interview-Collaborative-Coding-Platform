@@ -23,23 +23,22 @@ const navItems = [
 ];
 
 const skillData = [
-  { skill: "Algorithms", score: 72 },
-  { skill: "System Design", score: 58 },
-  { skill: "Behavioral", score: 84 },
-  { skill: "SQL", score: 66 },
-  { skill: "React", score: 90 },
+  { skill: "Confidence", score: 72 },
+  { skill: "Technical", score: 58 },
+  { skill: "Readiness", score: 84 },
+  { skill: "Problemsolving", score: 90 },
   { skill: "Communication", score: 78 },
 ];
 
 const progressData = [
-  { week: "Wk 1", score: 54 },
-  { week: "Wk 2", score: 61 },
-  { week: "Wk 3", score: 67 },
-  { week: "Wk 4", score: 63 },
-  { week: "Wk 5", score: 74 },
-  { week: "Wk 6", score: 81 },
-  { week: "Wk 7", score: 79 },
-  { week: "Wk 8", score: 88 },
+  { week: "Mock 1", score: 54 },
+  { week: "Mock 2", score: 61 },
+  { week: "Mock 3", score: 67 },
+  { week: "Mock 4", score: 63 },
+  { week: "Mock 5", score: 74 },
+  { week: "Mock 6", score: 81 },
+  { week: "Mock 7", score: 79 },
+  { week: "Mock 8", score: 88 },
 ];
 
 const practiceQuestions = [
@@ -174,12 +173,12 @@ function ScoreBar({ label, score, color }: { label: string; score: number; color
 function DashboardSection() {
   return (
     <div>
-      <SectionHeader title="Your Dashboard" subtitle="Week 8 performance — you're in the top 18% this month." />
+      <SectionHeader title="Your Dashboard" subtitle="Improved performance this month." />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard icon={<CheckCircle className="w-4.5 h-4.5" />} label="Questions Solved" value="124" sub="+12 this week" />
         <StatCard icon={<BarChart2 className="w-4.5 h-4.5" />} label="Readiness Score" value="88" sub="↑ 7 pts" accent />
         <StatCard icon={<Clock className="w-4.5 h-4.5" />} label="Practice Hours" value="34h" sub="Last 30 days" />
-        <StatCard icon={<Star className="w-4.5 h-4.5" />} label="Mock Sessions" value="9" sub="3 scheduled" />
+        <StatCard icon={<Star className="w-4.5 h-4.5" />} label="Mock Sessions" value="9" sub="Last 30 days" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         <div className="lg:col-span-3 bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
@@ -774,7 +773,7 @@ export default function CandidateDashboard() {
           <h1 className="text-[#0d1b2a] leading-tight" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700, fontSize: "1.55rem" }}>
             Welcome back, Arjun 👋
           </h1>
-          <p className="text-[#4a6080] text-sm mt-0.5">You have 1 interview scheduled this week.</p>
+          <p className="text-[#4a6080] text-sm mt-0.5">Start your journey with us.</p>
         </div>
         <button
           onClick={() => setActiveSection("mock")}
