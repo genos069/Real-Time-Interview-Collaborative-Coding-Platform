@@ -3,12 +3,14 @@ import {
   LayoutDashboard, BookOpen, Bot, Video, User,
   Clock, CheckCircle, TrendingUp, ChevronRight,
   Play, Lock, Star, Mic, Code2, MessageSquare,
-  Users, Calendar, BarChart2, Zap, Plus
+  Users, Calendar, BarChart2, Zap, Edit3,
+  Brain, Target, Lightbulb, AlertCircle, Camera,
+  Mail, MapPin, Briefcase, Plus, X, Save,
 } from "lucide-react";
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis,
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis,
-  CartesianGrid, Tooltip, AreaChart, Area,
+  ResponsiveContainer, AreaChart, Area,
+  XAxis, YAxis, CartesianGrid, Tooltip,
 } from "recharts";
 import { DashboardLayout } from "../components/DashboardLayout";
 
@@ -57,10 +59,31 @@ const mockSessions = [
   { id: 3, type: "System Design", duration: "60 min", topics: ["Scalability", "DB", "API"], score: null, date: "Jun 16, 2026", status: "scheduled" },
 ];
 
+const lastMockScores = {
+  session: "Technical Round — Jun 12, 2026",
+  overall: 82,
+  technical: 78,
+  readiness: 81,
+  confidence: 74,
+  communication: 85,
+  problemSolving: 80,
+  strengths: [
+    "Clearly articulated time and space complexity for every solution",
+    "Strong communication — broke down thought process step by step",
+    "Handled edge cases proactively without being prompted",
+    "Efficient use of hints — maintained momentum throughout",
+  ],
+  weaknesses: [
+    "Struggled to pivot when initial approach hit a dead end (System Design Q2)",
+    "Confidence dipped during backtracking problems — hesitated before committing",
+    "Missed opportunity to discuss trade-offs on the DP solution",
+  ],
+};
+
 const rooms = [
   { id: "R-4821", title: "Google L5 — Technical", host: "Sarah (Interviewer)", date: "Jun 16, 2026 · 3:00 PM", status: "upcoming", duration: "60 min" },
-  { id: "R-3390", title: "AI Mock — System Design", host: "CodeGear Bot", date: "Jun 12, 2026 · 11:00 AM", status: "completed", duration: "55 min" },
-  { id: "R-2711", title: "Behavioral Practice", host: "CodeGear Bot", date: "Jun 10, 2026 · 2:00 PM", status: "completed", duration: "32 min" },
+  { id: "R-3390", title: "AI Mock — System Design", host: "InterviewAI Bot", date: "Jun 12, 2026 · 11:00 AM", status: "completed", duration: "55 min" },
+  { id: "R-2711", title: "Behavioral Practice", host: "InterviewAI Bot", date: "Jun 10, 2026 · 2:00 PM", status: "completed", duration: "32 min" },
   { id: "R-5103", title: "Stripe SDE2 — Technical", host: "Marcus (Interviewer)", date: "Jun 20, 2026 · 4:30 PM", status: "upcoming", duration: "60 min" },
 ];
 
@@ -96,6 +119,56 @@ function StatCard({ icon, label, value, sub, accent }: { icon: React.ReactNode; 
   );
 }
 
+/* ── Score ring ── */
+function ScoreRing({ score, label, color, size = "md" }: { score: number; label: string; color: string; size?: "sm" | "md" | "lg" }) {
+  const r = size === "lg" ? 44 : size === "md" ? 30 : 22;
+  const stroke = size === "lg" ? 7 : 5;
+  const circumference = 2 * Math.PI * r;
+  const filled = (score / 100) * circumference;
+  const dim = (r + stroke + 4) * 2;
+  const textSize = size === "lg" ? "1.6rem" : size === "md" ? "0.9rem" : "0.75rem";
+
+  return (
+    <div className="flex flex-col items-center gap-1.5">
+      <svg width={dim} height={dim} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={dim / 2} cy={dim / 2} r={r} fill="none" stroke="#dde6ef" strokeWidth={stroke} />
+        <circle
+          cx={dim / 2} cy={dim / 2} r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth={stroke}
+          strokeDasharray={`${filled} ${circumference}`}
+          strokeLinecap="round"
+        />
+      </svg>
+      <div style={{ marginTop: -(dim / 2 + 14), position: "relative", zIndex: 1, transform: "rotate(0deg)", textAlign: "center", lineHeight: 1 }}>
+        <p style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700, fontSize: textSize, color: "#0d1b2a" }}>{score}</p>
+      </div>
+      <p className="text-[#4a6080] text-center leading-tight" style={{ fontSize: size === "lg" ? "0.8rem" : "0.7rem", fontWeight: 500, maxWidth: 70, marginTop: dim / 2 - 6 }}>
+        {label}
+      </p>
+    </div>
+  );
+}
+
+/* ── Score bar ── */
+function ScoreBar({ label, score, color }: { label: string; score: number; color: string }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[#0d1b2a] text-sm" style={{ fontWeight: 500 }}>{label}</span>
+        <span className="text-sm" style={{ fontWeight: 700, color }}>{score}<span className="text-[#4a6080] font-normal text-xs">/100</span></span>
+      </div>
+      <div className="h-2 bg-[#dde6ef] rounded-full overflow-hidden">
+        <div
+          className="h-full rounded-full transition-all duration-700"
+          style={{ width: `${score}%`, background: color }}
+        />
+      </div>
+    </div>
+  );
+}
+
 /* ── Sections ── */
 
 function DashboardSection() {
@@ -108,15 +181,13 @@ function DashboardSection() {
         <StatCard icon={<Clock className="w-4.5 h-4.5" />} label="Practice Hours" value="34h" sub="Last 30 days" />
         <StatCard icon={<Star className="w-4.5 h-4.5" />} label="Mock Sessions" value="9" sub="3 scheduled" />
       </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        {/* Line chart */}
         <div className="lg:col-span-3 bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
           <p className="text-[#0d1b2a] text-sm mb-4" style={{ fontWeight: 600 }}>Readiness Score — 8 Weeks</p>
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={progressData}>
               <defs>
-                <linearGradient id="scoreGrad" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id="cand-score-grad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#00bfa6" stopOpacity={0.15} />
                   <stop offset="95%" stopColor="#00bfa6" stopOpacity={0} />
                 </linearGradient>
@@ -125,12 +196,10 @@ function DashboardSection() {
               <XAxis dataKey="week" tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
               <YAxis domain={[40, 100]} tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={{ borderRadius: 10, border: "1px solid #dde6ef", fontSize: 12 }} />
-              <Area type="monotone" dataKey="score" stroke="#00bfa6" strokeWidth={2.5} fill="url(#scoreGrad)" dot={{ r: 3, fill: "#00bfa6" }} activeDot={{ r: 5 }} />
+              <Area type="monotone" dataKey="score" stroke="#00bfa6" strokeWidth={2.5} fill="url(#cand-score-grad)" dot={{ r: 3, fill: "#00bfa6" }} activeDot={{ r: 5 }} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
-
-        {/* Radar chart */}
         <div className="lg:col-span-2 bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
           <p className="text-[#0d1b2a] text-sm mb-2" style={{ fontWeight: 600 }}>Skill Breakdown</p>
           <ResponsiveContainer width="100%" height={200}>
@@ -142,8 +211,6 @@ function DashboardSection() {
           </ResponsiveContainer>
         </div>
       </div>
-
-      {/* Upcoming sessions */}
       <div className="mt-4 bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
         <p className="text-[#0d1b2a] text-sm mb-4" style={{ fontWeight: 600 }}>Recent & Upcoming Mock Sessions</p>
         <div className="space-y-3">
@@ -171,19 +238,17 @@ function DashboardSection() {
 function PracticeSection() {
   const [filter, setFilter] = useState<"All" | "Easy" | "Medium" | "Hard">("All");
   const filtered = filter === "All" ? practiceQuestions : practiceQuestions.filter((q) => q.difficulty === filter);
-
   return (
     <div>
       <SectionHeader title="Practice Questions" subtitle="Curated by role and difficulty. Solve daily to boost your score." />
-
-      {/* Filters */}
       <div className="flex gap-2 mb-5">
         {(["All", "Easy", "Medium", "Hard"] as const).map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`px-4 py-1.5 rounded-full text-sm border transition-all ${filter === f ? "bg-[#0d1b2a] text-white border-[#0d1b2a]" : "bg-white text-[#4a6080] border-[#0d1b2a]/12 hover:border-[#0d1b2a]/25"
-              }`}
+            className={`px-4 py-1.5 rounded-full text-sm border transition-all ${
+              filter === f ? "bg-[#0d1b2a] text-white border-[#0d1b2a]" : "bg-white text-[#4a6080] border-[#0d1b2a]/12 hover:border-[#0d1b2a]/25"
+            }`}
             style={{ fontWeight: filter === f ? 600 : 400 }}
           >
             {f}
@@ -194,7 +259,6 @@ function PracticeSection() {
           {practiceQuestions.filter((q) => q.done).length}/{practiceQuestions.length} completed
         </div>
       </div>
-
       <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 overflow-hidden">
         {filtered.map((q, i) => (
           <div
@@ -225,6 +289,16 @@ function PracticeSection() {
 }
 
 function MockSection() {
+  const s = lastMockScores;
+
+  const scoreMetrics = [
+    { label: "Technical", score: s.technical, color: "#0d1b2a", icon: <Code2 className="w-4 h-4" /> },
+    { label: "Readiness", score: s.readiness, color: "#00bfa6", icon: <Target className="w-4 h-4" /> },
+    { label: "Confidence", score: s.confidence, color: "#7c5cbf", icon: <Brain className="w-4 h-4" /> },
+    { label: "Communication", score: s.communication, color: "#2196f3", icon: <MessageSquare className="w-4 h-4" /> },
+    { label: "Problem-Solving", score: s.problemSolving, color: "#f59e0b", icon: <Lightbulb className="w-4 h-4" /> },
+  ];
+
   const types = [
     { icon: <Code2 className="w-5 h-5" />, title: "Technical Round", desc: "DSA, system design, and coding challenges with real-time code execution.", duration: "45 min", locked: false },
     { icon: <MessageSquare className="w-5 h-5" />, title: "Behavioral Round", desc: "STAR-method questions evaluated by AI for structure and impact.", duration: "30 min", locked: false },
@@ -233,42 +307,104 @@ function MockSection() {
   ];
 
   return (
-    <div>
+    <div className="space-y-6">
       <SectionHeader title="AI Mock Interview" subtitle="Practice with our AI interviewer. Get scored on clarity, depth, and speed." />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
-        {types.map(({ icon, title, desc, duration, locked }) => (
-          <div
-            key={title}
-            className={`relative bg-white rounded-2xl border p-6 transition-all ${locked ? "border-[#0d1b2a]/6 opacity-60" : "border-[#0d1b2a]/8 hover:border-[#00bfa6]/40 hover:shadow-md hover:shadow-[#00bfa6]/5 cursor-pointer"}`}
-          >
-            {locked && (
-              <div className="absolute top-4 right-4 text-[#4a6080]/60">
-                <Lock className="w-4 h-4" />
+      {/* ── Last Session Results ── */}
+      <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 overflow-hidden">
+        {/* Header bar */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#0d1b2a]/8 bg-[#0d1b2a]">
+          <div>
+            <p className="text-white text-sm" style={{ fontWeight: 600 }}>Last Mock Session Results</p>
+            <p className="text-white/50 text-xs mt-0.5">{s.session}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[#00bfa6] text-2xl" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700 }}>{s.overall}</span>
+            <span className="text-white/40 text-sm">/100 overall</span>
+          </div>
+        </div>
+
+        <div className="p-6">
+          {/* Score rings row */}
+          <div className="grid grid-cols-5 gap-4 mb-6">
+            {scoreMetrics.map(({ label, score, color, icon }) => (
+              <div key={label} className="bg-[#f8fafc] rounded-xl border border-[#0d1b2a]/6 p-4 flex flex-col items-center gap-2">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${color}18` }}>
+                  <span style={{ color }}>{icon}</span>
+                </div>
+                {/* Score arc */}
+                <div className="relative flex items-center justify-center" style={{ width: 56, height: 56 }}>
+                  <svg width={56} height={56} style={{ transform: "rotate(-90deg)", position: "absolute" }}>
+                    <circle cx={28} cy={28} r={22} fill="none" stroke="#dde6ef" strokeWidth={5} />
+                    <circle
+                      cx={28} cy={28} r={22}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={5}
+                      strokeDasharray={`${(score / 100) * (2 * Math.PI * 22)} ${2 * Math.PI * 22}`}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <span style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700, fontSize: "0.9rem", color: "#0d1b2a", position: "relative", zIndex: 1 }}>
+                    {score}
+                  </span>
+                </div>
+                <p className="text-[#4a6080] text-xs text-center leading-tight" style={{ fontWeight: 500 }}>{label}</p>
               </div>
-            )}
-            <div className="w-10 h-10 rounded-xl bg-[#0d1b2a] flex items-center justify-center mb-4 text-[#00bfa6]">
-              {icon}
+            ))}
+          </div>
+
+          {/* Score bars */}
+          <div className="space-y-3 mb-6">
+            {scoreMetrics.map(({ label, score, color }) => (
+              <ScoreBar key={label} label={label} score={score} color={color} />
+            ))}
+          </div>
+
+          {/* Strengths & Weaknesses */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Strengths */}
+            <div className="bg-emerald-50 border border-emerald-200/70 rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center">
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                </div>
+                <p className="text-emerald-800 text-sm" style={{ fontWeight: 600 }}>Strengths</p>
+              </div>
+              <ul className="space-y-2">
+                {s.strengths.map((item, i) => (
+                  <li key={i} className="flex items-start gap-2 text-xs text-emerald-700 leading-relaxed">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 mt-1.5" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
             </div>
-            <h3 className="text-[#0d1b2a] mb-1.5" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 600, fontSize: "1rem" }}>
-              {title}
-            </h3>
-            <p className="text-[#4a6080] text-sm leading-relaxed mb-4">{desc}</p>
-            <div className="flex items-center justify-between">
-              <span className="text-[#4a6080] text-xs flex items-center gap-1.5"><Clock className="w-3 h-3" />{duration}</span>
-              {!locked && (
-                <button className="bg-[#00bfa6] text-[#0d1b2a] text-xs px-4 py-1.5 rounded-lg hover:bg-[#00d4b8] transition-colors flex items-center gap-1.5" style={{ fontWeight: 600 }}>
-                  <Play className="w-3 h-3" /> Start
-                </button>
-              )}
+
+            {/* Weaknesses */}
+            <div className="bg-rose-50 border border-rose-200/70 rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 rounded-full bg-rose-100 flex items-center justify-center">
+                  <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                </div>
+                <p className="text-rose-800 text-sm" style={{ fontWeight: 600 }}>Areas to Improve</p>
+              </div>
+              <ul className="space-y-2">
+                {s.weaknesses.map((item, i) => (
+                  <li key={i} className="flex items-start gap-2 text-xs text-rose-700 leading-relaxed">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0 mt-1.5" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
-        ))}
+        </div>
       </div>
 
-      {/* Past AI sessions */}
+      {/* Past sessions */}
       <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
-        <p className="text-[#0d1b2a] text-sm mb-4" style={{ fontWeight: 600 }}>Recent Mock Sessions</p>
+        <p className="text-[#0d1b2a] text-sm mb-4" style={{ fontWeight: 600 }}>Past Sessions</p>
         <div className="space-y-3">
           {mockSessions.filter((s) => s.status === "completed").map((s) => (
             <div key={s.id} className="flex items-center gap-4 p-3.5 rounded-xl bg-[#f0f4f8]">
@@ -326,16 +462,17 @@ function RoomsSection() {
   );
 }
 
-function ProfileSection() {
+function ProfileSection({ onEdit }: { onEdit: () => void }) {
   const skills = ["React", "TypeScript", "Node.js", "Python", "System Design", "SQL"];
   return (
     <div>
       <SectionHeader title="Profile" subtitle="Your candidate profile visible to interviewers." />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Profile card */}
         <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-7 flex flex-col items-center text-center">
-          <div className="w-20 h-20 rounded-full bg-[#00bfa6] flex items-center justify-center text-[#0d1b2a] text-2xl mb-4" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700 }}>
-            AM
+          <div className="relative mb-4">
+            <div className="w-20 h-20 rounded-full bg-[#00bfa6] flex items-center justify-center text-[#0d1b2a] text-2xl" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700 }}>
+              AM
+            </div>
           </div>
           <h3 className="text-[#0d1b2a] mb-0.5" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700, fontSize: "1.1rem" }}>Arjun Mehta</h3>
           <p className="text-[#4a6080] text-sm mb-1">arjun.mehta@email.com</p>
@@ -355,20 +492,21 @@ function ProfileSection() {
               ))}
             </div>
           </div>
-          <button className="mt-5 w-full border border-[#0d1b2a]/15 text-[#0d1b2a] text-sm py-2.5 rounded-xl hover:bg-[#f0f4f8] transition-colors" style={{ fontWeight: 500 }}>
-            Edit Profile
+          <button
+            onClick={onEdit}
+            className="mt-5 w-full flex items-center justify-center gap-2 bg-[#0d1b2a] text-white text-sm py-2.5 rounded-xl hover:bg-[#1a2f45] transition-colors"
+            style={{ fontWeight: 600 }}
+          >
+            <Edit3 className="w-3.5 h-3.5" /> Edit Profile
           </button>
         </div>
-
-        {/* Details */}
         <div className="lg:col-span-2 space-y-4">
           <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
-            <p className="text-[#0d1b2a] text-sm mb-4" style={{ fontWeight: 600 }}>About</p>
+            <p className="text-[#0d1b2a] text-sm mb-3" style={{ fontWeight: 600 }}>About</p>
             <p className="text-[#4a6080] text-sm leading-relaxed">
               3 years of experience building scalable React applications. Passionate about performance optimization and clean architecture. Currently preparing for senior engineering roles at top-tier tech companies.
             </p>
           </div>
-
           <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
             <p className="text-[#0d1b2a] text-sm mb-4" style={{ fontWeight: 600 }}>Target Roles & Companies</p>
             <div className="flex flex-wrap gap-2">
@@ -379,7 +517,6 @@ function ProfileSection() {
               ))}
             </div>
           </div>
-
           <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
             <p className="text-[#0d1b2a] text-sm mb-4" style={{ fontWeight: 600 }}>Experience</p>
             <div className="space-y-3">
@@ -405,6 +542,212 @@ function ProfileSection() {
   );
 }
 
+function EditProfileSection({ onBack }: { onBack: () => void }) {
+  const [skills, setSkills] = useState(["React", "TypeScript", "Node.js", "Python", "System Design", "SQL"]);
+  const [targets, setTargets] = useState(["Senior Frontend Engineer", "Staff Engineer", "Google", "Stripe", "Shopify", "Notion"]);
+  const [newSkill, setNewSkill] = useState("");
+  const [newTarget, setNewTarget] = useState("");
+  const [form, setForm] = useState({
+    name: "Arjun Mehta",
+    email: "arjun.mehta@email.com",
+    title: "Frontend Engineer",
+    location: "Bangalore, India",
+    about: "3 years of experience building scalable React applications. Passionate about performance optimization and clean architecture. Currently preparing for senior engineering roles at top-tier tech companies.",
+    linkedin: "linkedin.com/in/arjunmehta",
+    github: "github.com/arjunmehta",
+    phone: "+91 98765 43210",
+  });
+
+  const inputCls = "w-full bg-[#f0f4f8] border border-[#0d1b2a]/10 rounded-xl px-4 py-3 text-[#0d1b2a] placeholder-[#4a6080]/50 text-sm focus:outline-none focus:ring-2 focus:ring-[#00bfa6]/30 focus:border-[#00bfa6]/60 transition-all";
+
+  function addSkill() {
+    if (newSkill.trim() && !skills.includes(newSkill.trim())) {
+      setSkills([...skills, newSkill.trim()]);
+      setNewSkill("");
+    }
+  }
+  function addTarget() {
+    if (newTarget.trim() && !targets.includes(newTarget.trim())) {
+      setTargets([...targets, newTarget.trim()]);
+      setNewTarget("");
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center gap-3 mb-6">
+        <button onClick={onBack} className="w-8 h-8 rounded-lg bg-white border border-[#0d1b2a]/10 flex items-center justify-center text-[#4a6080] hover:text-[#0d1b2a] transition-colors">
+          ←
+        </button>
+        <div>
+          <h2 className="text-[#0d1b2a]" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700, fontSize: "1.35rem" }}>Edit Profile</h2>
+          <p className="text-[#4a6080] text-sm">Update your candidate profile details.</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Avatar card */}
+        <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-7 flex flex-col items-center text-center h-fit">
+          <div className="relative mb-5">
+            <div className="w-24 h-24 rounded-full bg-[#00bfa6] flex items-center justify-center text-[#0d1b2a] text-3xl" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700 }}>
+              AM
+            </div>
+            <button className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-[#0d1b2a] flex items-center justify-center shadow-lg hover:bg-[#1a2f45] transition-colors">
+              <Camera className="w-3.5 h-3.5 text-white" />
+            </button>
+          </div>
+          <p className="text-[#0d1b2a] text-sm mb-1" style={{ fontWeight: 600 }}>Profile Photo</p>
+          <p className="text-[#4a6080] text-xs mb-4">JPG, PNG or GIF · Max 4MB</p>
+          <button className="w-full border border-[#0d1b2a]/15 text-[#0d1b2a] text-sm py-2 rounded-xl hover:bg-[#f0f4f8] transition-colors" style={{ fontWeight: 500 }}>
+            Upload Photo
+          </button>
+          <button className="mt-2 w-full text-rose-500 text-sm py-2 rounded-xl hover:bg-rose-50 transition-colors" style={{ fontWeight: 500 }}>
+            Remove Photo
+          </button>
+        </div>
+
+        {/* Form */}
+        <div className="lg:col-span-2 space-y-5">
+          {/* Basic info */}
+          <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
+            <p className="text-[#0d1b2a] text-sm mb-4" style={{ fontWeight: 600 }}>Basic Information</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[#0d1b2a] text-xs mb-1.5" style={{ fontWeight: 500 }}>Full Name</label>
+                <div className="relative">
+                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#4a6080]" />
+                  <input className={`${inputCls} pl-10`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[#0d1b2a] text-xs mb-1.5" style={{ fontWeight: 500 }}>Email</label>
+                <div className="relative">
+                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#4a6080]" />
+                  <input type="email" className={`${inputCls} pl-10`} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[#0d1b2a] text-xs mb-1.5" style={{ fontWeight: 500 }}>Job Title</label>
+                <div className="relative">
+                  <Briefcase className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#4a6080]" />
+                  <input className={`${inputCls} pl-10`} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[#0d1b2a] text-xs mb-1.5" style={{ fontWeight: 500 }}>Location</label>
+                <div className="relative">
+                  <MapPin className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#4a6080]" />
+                  <input className={`${inputCls} pl-10`} value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* About */}
+          <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
+            <label className="block text-[#0d1b2a] text-sm mb-3" style={{ fontWeight: 600 }}>About / Bio</label>
+            <textarea
+              className={`${inputCls} resize-none h-28`}
+              value={form.about}
+              onChange={(e) => setForm({ ...form, about: e.target.value })}
+            />
+            <p className="text-[#4a6080] text-xs mt-1.5">{form.about.length}/400 characters</p>
+          </div>
+
+          {/* Skills */}
+          <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
+            <p className="text-[#0d1b2a] text-sm mb-3" style={{ fontWeight: 600 }}>Skills</p>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {skills.map((s) => (
+                <span key={s} className="flex items-center gap-1.5 text-xs bg-[#00bfa6]/10 text-[#00bfa6] border border-[#00bfa6]/20 px-2.5 py-1 rounded-full" style={{ fontWeight: 500 }}>
+                  {s}
+                  <button onClick={() => setSkills(skills.filter((sk) => sk !== s))} className="hover:text-rose-500 transition-colors">
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input
+                className={`${inputCls} flex-1`}
+                placeholder="Add a skill…"
+                value={newSkill}
+                onChange={(e) => setNewSkill(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addSkill()}
+              />
+              <button onClick={addSkill} className="bg-[#0d1b2a] text-white px-4 rounded-xl hover:bg-[#1a2f45] transition-colors">
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Target roles */}
+          <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
+            <p className="text-[#0d1b2a] text-sm mb-3" style={{ fontWeight: 600 }}>Target Roles & Companies</p>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {targets.map((t) => (
+                <span key={t} className="flex items-center gap-1.5 text-xs bg-[#f0f4f8] text-[#4a6080] border border-[#0d1b2a]/8 px-2.5 py-1 rounded-full">
+                  {t}
+                  <button onClick={() => setTargets(targets.filter((tg) => tg !== t))} className="hover:text-rose-500 transition-colors">
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input
+                className={`${inputCls} flex-1`}
+                placeholder="Add role or company…"
+                value={newTarget}
+                onChange={(e) => setNewTarget(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addTarget()}
+              />
+              <button onClick={addTarget} className="bg-[#0d1b2a] text-white px-4 rounded-xl hover:bg-[#1a2f45] transition-colors">
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Social links */}
+          <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
+            <p className="text-[#0d1b2a] text-sm mb-4" style={{ fontWeight: 600 }}>Links & Contact</p>
+            <div className="space-y-3">
+              {[
+                { label: "LinkedIn", key: "linkedin" as const },
+                { label: "GitHub", key: "github" as const },
+                { label: "Phone", key: "phone" as const },
+              ].map(({ label, key }) => (
+                <div key={key}>
+                  <label className="block text-[#0d1b2a] text-xs mb-1.5" style={{ fontWeight: 500 }}>{label}</label>
+                  <input className={inputCls} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Save / Cancel */}
+          <div className="flex items-center justify-end gap-3 pb-2">
+            <button
+              onClick={onBack}
+              className="px-6 py-2.5 border border-[#0d1b2a]/15 text-[#4a6080] text-sm rounded-xl hover:text-[#0d1b2a] hover:bg-[#f0f4f8] transition-colors"
+              style={{ fontWeight: 500 }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onBack}
+              className="flex items-center gap-2 bg-[#00bfa6] text-[#0d1b2a] text-sm px-6 py-2.5 rounded-xl hover:bg-[#00d4b8] transition-colors"
+              style={{ fontWeight: 600 }}
+            >
+              <Save className="w-3.5 h-3.5" /> Save Changes
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CandidateDashboard() {
   const [activeSection, setActiveSection] = useState("dashboard");
 
@@ -413,7 +756,8 @@ export default function CandidateDashboard() {
     practice: <PracticeSection />,
     mock: <MockSection />,
     rooms: <RoomsSection />,
-    profile: <ProfileSection />,
+    profile: <ProfileSection onEdit={() => setActiveSection("edit-profile")} />,
+    "edit-profile": <EditProfileSection onBack={() => setActiveSection("profile")} />,
   };
 
   return (
@@ -425,7 +769,6 @@ export default function CandidateDashboard() {
       userName="Arjun Mehta"
       userInitials="AM"
     >
-      {/* Welcome bar */}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-[#0d1b2a] leading-tight" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700, fontSize: "1.55rem" }}>
