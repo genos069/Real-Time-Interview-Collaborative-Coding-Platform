@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router";
 import {
   LayoutDashboard, BookOpen, Bot, Video, User,
   Clock, CheckCircle, TrendingUp, ChevronRight,
@@ -13,6 +14,8 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip,
 } from "recharts";
 import { DashboardLayout } from "../components/DashboardLayout";
+
+
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard className="w-4 h-4" /> },
@@ -237,6 +240,7 @@ function DashboardSection() {
 function PracticeSection() {
   const [filter, setFilter] = useState<"All" | "Easy" | "Medium" | "Hard">("All");
   const filtered = filter === "All" ? practiceQuestions : practiceQuestions.filter((q) => q.difficulty === filter);
+  const navigate = useNavigate();
   return (
     <div>
       <SectionHeader title="Practice Questions" subtitle="Curated by role and difficulty. Solve daily to boost your score." />
@@ -278,7 +282,7 @@ function PracticeSection() {
             </span>
             {q.time
               ? <span className="text-[#4a6080] text-xs flex items-center gap-1"><Clock className="w-3 h-3" />{q.time}</span>
-              : <button className="text-[#00bfa6] text-xs flex items-center gap-1 hover:underline"><Play className="w-3 h-3" />Solve</button>
+              : <button onClick={() => navigate("/CodeEditor")} className="text-[#00bfa6] text-xs flex items-center gap-1 hover:underline"><Play className="w-3 h-3" />Solve</button>
             }
           </div>
         ))}
