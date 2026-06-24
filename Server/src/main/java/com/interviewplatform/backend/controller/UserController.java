@@ -5,6 +5,7 @@ import com.interviewplatform.backend.model.User;
 import com.interviewplatform.backend.service.UserService;
 import com.interviewplatform.backend.dto.LoginRequest;
 import org.springframework.web.bind.annotation.*;
+import com.interviewplatform.backend.dto.UserResponse;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -37,5 +38,11 @@ public class UserController {
     @GetMapping("/profile")
     public String profile() {
         return "Access Granted";
+    }
+
+    // Current User
+    @GetMapping("/me")
+    public UserResponse getCurrentUser() {
+        return userService.getCurrentUser();
     }
 }

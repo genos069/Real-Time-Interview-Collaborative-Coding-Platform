@@ -7,6 +7,9 @@ import com.interviewplatform.backend.repository.UserRepository;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import com.interviewplatform.backend.jwt.JwtUtil;
+import com.interviewplatform.backend.dto.UserResponse;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 @Service
 public class UserService {
@@ -27,6 +30,19 @@ public class UserService {
     // REGISTER
     public User registerUser(User user) {
 
+        // Check if email already exists
+        if (userRepository.findByEmail(user.getEmail()).isPresent()) {
+            throw new RuntimeException("Email already exists");
+        }
+
+        // Password validation
+        if (user.getPassword().length() < 8) {
+            throw new RuntimeException(
+                    "Password must be at least 8 characters long"
+            );
+        }
+
+        // Encrypt password
         user.setPassword(
                 passwordEncoder.encode(user.getPassword())
         );
@@ -40,6 +56,11 @@ public class UserService {
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() ->
                         new RuntimeException("User not found"));
+
+        // Role validation
+        if (!user.getRole().equalsIgnoreCase(request.getRole())) {
+            throw new RuntimeException("Invalid role selected");
+        }
 
         boolean isPasswordCorrect = passwordEncoder.matches(
                 request.getPassword(),
@@ -59,6 +80,37 @@ public class UserService {
                 user.getRole(),
                 token
         );
+    }
 
+    public UserResponse getCurrentUser() {
+
+        Authentication authentication =
+                SecurityContextHolder.getContext().getAuthentication();
+
+        String email = authentication.getName();
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() ->
+                        new RuntimeException("User not found"));
+
+        return new UserResponse(
+                user.getId(),
+                user.getName(),
+                user.getEmail(),
+                user.getRole()
+        );
+    }
+
+    // Logged-in User
+    public User getLoggedInUser() {
+
+        Authentication authentication =
+                SecurityContextHolder.getContext().getAuthentication();
+
+        String email = authentication.getName();
+
+        return userRepository.findByEmail(email)
+                .orElseThrow(() ->
+                        new RuntimeException("User not found"));
     }
 }
