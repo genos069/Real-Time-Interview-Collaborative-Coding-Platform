@@ -17,10 +17,14 @@ public class JwtUtil {
                             .getBytes()
             );
 
-    public String generateToken(String email) {
+    public String generateToken(
+            String email,
+            String role
+    ) {
 
         return Jwts.builder()
                 .subject(email)
+                .claim("role", role)
                 .issuedAt(new Date())
                 .expiration(
                         new Date(
@@ -40,6 +44,17 @@ public class JwtUtil {
                 .getPayload();
 
         return claims.getSubject();
+    }
+
+    public String extractRole(String token) {
+
+        Claims claims = Jwts.parser()
+                .verifyWith(SECRET_KEY)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+
+        return claims.get("role", String.class);
     }
 
     public boolean validateToken(String token) {

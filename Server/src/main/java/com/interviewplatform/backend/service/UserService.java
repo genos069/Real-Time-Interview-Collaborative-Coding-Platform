@@ -10,6 +10,7 @@ import com.interviewplatform.backend.jwt.JwtUtil;
 import com.interviewplatform.backend.dto.UserResponse;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import com.interviewplatform.backend.dto.UpdateUserRequest;
 
 @Service
 public class UserService {
@@ -71,7 +72,10 @@ public class UserService {
             throw new RuntimeException("Invalid password");
         }
 
-        String token = jwtUtil.generateToken(user.getEmail());
+        String token = jwtUtil.generateToken(
+                user.getEmail(),
+                user.getRole()
+        );
 
         return new AuthResponse(
                 user.getId(),
@@ -112,5 +116,34 @@ public class UserService {
         return userRepository.findByEmail(email)
                 .orElseThrow(() ->
                         new RuntimeException("User not found"));
+    }
+
+    // Update Profile
+    public UserResponse updateProfile(
+            UpdateUserRequest request
+    ) {
+
+        // User Details
+        User user = getLoggedInUser();
+
+        // Update Fields
+        user.setName(
+                request.getName()
+        );
+
+        user.setEmail(
+                request.getEmail()
+        );
+
+        // Save User
+        User updatedUser = userRepository.save(user);
+
+        // Response
+        return new UserResponse(
+                updatedUser.getId(),
+                updatedUser.getName(),
+                updatedUser.getEmail(),
+                updatedUser.getRole()
+        );
     }
 }
