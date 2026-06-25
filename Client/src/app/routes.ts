@@ -4,6 +4,8 @@ import Auth from "./pages/Auth";
 import CandidateDashboard from "./pages/CandidateDashboard";
 import InterviewerDashboard from "./pages/InterviewerDashboard";
 import CodeEditor from "./pages/CodeEditor";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 
 export const router = createBrowserRouter([
   {
@@ -25,5 +27,13 @@ export const router = createBrowserRouter([
   {
     path: "/CodeEditor",
     Component: CodeEditor,
+  },
+  {
+    path: "/forgot-password",
+    Component: ForgotPassword,
+  },
+  {
+    path: "/reset-password/:token",
+    Component: ResetPassword,
   },
 ]);

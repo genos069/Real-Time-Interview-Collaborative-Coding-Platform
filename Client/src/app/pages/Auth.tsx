@@ -304,7 +304,12 @@ export default function Auth() {
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-[#0d1b2a] text-sm" style={{ fontWeight: 500 }}>Password</label>
                 {tab === "login" && (
-                  <a href="#" className="text-[#00bfa6] text-xs hover:underline">Forgot password?</a>
+                  <Link
+                    to="/forgot-password"
+                    className="text-[#00bfa6] text-xs hover:underline"
+                  >
+                    Forgot password?
+                  </Link>
                 )}
               </div>
               <div className="relative">
