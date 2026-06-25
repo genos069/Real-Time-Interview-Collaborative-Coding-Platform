@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from "react";
+import Editor from "@monaco-editor/react";
+import nightOwlTheme from "./../../themes/NightOwl.json";
 import type { ReactNode } from "react";
 import {
   Play, Send, ChevronDown, CheckCircle, XCircle,
@@ -64,6 +66,14 @@ You can return the answer in any order.`,
 };
 
 const LANGUAGES = ["Python3", "JavaScript", "C++", "Java", "Go", "Rust"];
+const MONACO_LANGUAGES: Record<string, string> = {
+  Python3: "python",
+  JavaScript: "javascript",
+  "C++": "cpp",
+  Java: "java",
+  Go: "go",
+  Rust: "rust",
+};
 
 const STARTER_CODE: Record<string, string> = {
   Python3: `from typing import List
@@ -190,11 +200,10 @@ function TabBar({
         <button
           key={tab}
           onClick={() => onChange(tab)}
-          className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium capitalize transition-colors border-b-2 -mb-px ${
-            active === tab
-              ? "border-primary text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
+          className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium capitalize transition-colors border-b-2 -mb-px ${active === tab
+            ? "border-primary text-foreground"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
         >
           {icons?.[tab]}
           {tab}
@@ -324,7 +333,11 @@ export default function CodeEditor() {
   const [bottomTab, setBottomTab] = useState("testcases");
   const [lang, setLang] = useState("Python3");
   const [langOpen, setLangOpen] = useState(false);
-  const [code, setCode] = useState(STARTER_CODE["Python3"]);
+  const [codes, setCodes] = useState<Record<string, string>>(
+    Object.fromEntries(
+      LANGUAGES.map((lang) => [lang, STARTER_CODE[lang]])
+    )
+  );
   const [activeCase, setActiveCase] = useState(0);
 
   // Execution
@@ -337,7 +350,15 @@ export default function CodeEditor() {
   const rightRef = useRef<HTMLDivElement>(null);
   const horizDragging = useRef(false);
   const vertDragging = useRef(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleEditorMount = (_editor: any, monaco: any) => {
+  monaco.editor.defineTheme(
+    "night-owl",
+    nightOwlTheme as any
+  );
+
+  monaco.editor.setTheme("night-owl");
+};
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -366,7 +387,6 @@ export default function CodeEditor() {
 
   const handleLangChange = (l: string) => {
     setLang(l);
-    setCode(STARTER_CODE[l]);
     setLangOpen(false);
   };
 
@@ -411,9 +431,6 @@ export default function CodeEditor() {
     });
     setSubmitting(false);
   };
-
-  const lines = code.split("\n");
-  const lineHeight = 22;
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-background text-foreground">
@@ -540,9 +557,8 @@ export default function CodeEditor() {
                     <button
                       key={l}
                       onClick={() => handleLangChange(l)}
-                      className={`w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-secondary ${
-                        l === lang ? "text-primary" : "text-foreground"
-                      }`}
+                      className={`w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-secondary ${l === lang ? "text-primary" : "text-foreground"
+                        }`}
                     >
                       {l}
                     </button>
@@ -554,68 +570,71 @@ export default function CodeEditor() {
             <button
               className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
               title="Reset to starter code"
-              onClick={() => setCode(STARTER_CODE[lang])}
+              onClick={() =>
+                setCodes((prev) => ({
+                  ...prev,
+                  [lang]: STARTER_CODE[lang],
+                }))
+              }
             >
               <RotateCcw size={13} />
             </button>
           </div>
 
-          {/* ── Code Editor ── */}
-          <div className="flex-1 overflow-auto scrollbar-hide min-h-0" style={{ background: "#0d1b2a" }}>
-            <div className="flex" style={{ minHeight: "100%" }}>
-              {/* Line numbers */}
-              <div
-                className="select-none shrink-0 pt-4 pb-4 pr-3 pl-4 text-right font-mono text-muted-foreground/35 sticky left-0 z-10"
-                style={{
-                  fontSize: 12,
-                  lineHeight: `${lineHeight}px`,
-                  background: "#0d1b2a",
-                  minWidth: "3rem",
-                }}
-              >
-                {lines.map((_, i) => (
-                  <div key={i} style={{ height: lineHeight }}>
-                    {i + 1}
-                  </div>
-                ))}
-              </div>
+          {/* ── Monaco Editor ── */}
+          <div
+            className="flex-1 overflow-hidden"
+            style={{ background: "#0d1b2a" }}
+          >
+            <Editor
+              height="100%"
+              language={MONACO_LANGUAGES[lang]}
+              value={codes[lang]}
+              onChange={(value) =>
+                setCodes((prev) => ({
+                  ...prev,
+                  [lang]: value || "",
+                }))
+              }
+              onMount={handleEditorMount}
+              options={{
+                bracketPairColorization: {
+                  enabled: true,
+                },
 
-              {/* Textarea */}
-              <textarea
-                ref={textareaRef}
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                className="flex-1 bg-transparent text-foreground/90 resize-none outline-none py-4 pr-6 caret-primary font-mono"
-                style={{
-                  fontSize: 12,
-                  lineHeight: `${lineHeight}px`,
-                  height: `${lines.length * lineHeight + 32}px`,
-                  minHeight: "100%",
-                  overflow: "hidden",
-                  whiteSpace: "pre",
-                  tabSize: 4,
-                }}
-                spellCheck={false}
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                onKeyDown={(e) => {
-                  if (e.key === "Tab") {
-                    e.preventDefault();
-                    const start = e.currentTarget.selectionStart;
-                    const end = e.currentTarget.selectionEnd;
-                    const next = code.substring(0, start) + "    " + code.substring(end);
-                    setCode(next);
-                    setTimeout(() => {
-                      if (textareaRef.current) {
-                        textareaRef.current.selectionStart = start + 4;
-                        textareaRef.current.selectionEnd = start + 4;
-                      }
-                    }, 0);
-                  }
-                }}
-              />
-            </div>
+                guides: {
+                  bracketPairs: true,
+                },
+
+                folding: true,
+
+                quickSuggestions: true,
+
+                suggestOnTriggerCharacters: true,
+
+                formatOnPaste: true,
+
+                formatOnType: true,
+                fontSize: 14,
+                fontFamily: "JetBrains Mono, monospace",
+                minimap: {
+                  enabled: false,
+                },
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+                wordWrap: "off",
+                lineNumbers: "on",
+                tabSize: 4,
+                insertSpaces: true,
+                renderLineHighlight: "all",
+                cursorBlinking: "smooth",
+                roundedSelection: true,
+                smoothScrolling: true,
+                padding: {
+                  top: 16,
+                },
+              }}
+            />
           </div>
 
           {/* Vertical drag handle */}
@@ -664,11 +683,10 @@ export default function CodeEditor() {
                       <button
                         key={tc.id}
                         onClick={() => setActiveCase(i)}
-                        className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                          activeCase === i
-                            ? "bg-secondary text-foreground"
-                            : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
-                        }`}
+                        className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${activeCase === i
+                          ? "bg-secondary text-foreground"
+                          : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                          }`}
                       >
                         Case {i + 1}
                       </button>
