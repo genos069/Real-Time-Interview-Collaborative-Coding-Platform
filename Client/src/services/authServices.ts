@@ -26,10 +26,13 @@ export const loginInterviewer = (data: AuthData) =>
 export const registerInterviewer = (data: RegisterInterviewerData) =>
   API.post("/auth/register-interviewer", data);
 
-export const forgotPassword = (data: { email: string }) =>
-  API.post("/auth/forgot-password", data);
+export const forgotPassword = (email: string) =>
+  API.post("/auth/forgot-password", { email });
 
 export const resetPassword = (
   token: string,
-  data: { password: string }
-) => API.put(`/auth/reset-password/${token}`, data);
+  password: string
+) =>
+  API.post(`/auth/reset-password/${token}`, {
+    password,
+  });
