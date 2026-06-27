@@ -1,50 +1,21 @@
 package com.interviewplatform.backend.controller;
 
-import com.interviewplatform.backend.dto.AuthResponse;
-import com.interviewplatform.backend.dto.LoginRequest;
 import com.interviewplatform.backend.dto.UpdateUserRequest;
 import com.interviewplatform.backend.dto.UserResponse;
-import com.interviewplatform.backend.model.User;
 import com.interviewplatform.backend.service.UserService;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping("/api/user")
+@CrossOrigin(origins = "http://localhost:5173")
 public class UserController {
 
     // User Service
     private final UserService userService;
 
     // Constructor
-    public UserController(
-            UserService userService
-    ) {
+    public UserController(UserService userService) {
         this.userService = userService;
-    }
-
-    // Register User
-    @PostMapping("/register")
-    public User register(
-            @RequestBody User user
-    ) {
-        return userService.registerUser(user);
-    }
-
-    // Login User
-    @PostMapping("/login")
-    public AuthResponse login(
-            @RequestBody LoginRequest request
-    ) {
-
-        System.out.println("LOGIN CONTROLLER HIT");
-
-        return userService.loginUser(request);
-    }
-
-    // Test API
-    @GetMapping("/test")
-    public String test() {
-        return "Backend is working!";
     }
 
     // Protected API
@@ -53,7 +24,7 @@ public class UserController {
         return "Access Granted";
     }
 
-    // Current User
+    // Current Logged-in User
     @GetMapping("/me")
     public UserResponse getCurrentUser() {
         return userService.getCurrentUser();
@@ -66,4 +37,5 @@ public class UserController {
     ) {
         return userService.updateProfile(request);
     }
+
 }
