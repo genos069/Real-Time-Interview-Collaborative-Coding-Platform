@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router";
+import { Client } from "@stomp/stompjs";
+import { getToken } from "../bot/utils/auth";
 import {
   Mic, MicOff, Video, VideoOff, Monitor, MonitorOff, Hand, Maximize2, Minimize2,
   Users, PhoneOff, MessageSquare, Code2, Send, ChevronDown, Play, RotateCcw,
@@ -59,6 +61,22 @@ const SHORTCUTS = [
   { keys: ["Ctrl", "Z"], label: "Undo" },
   { keys: ["F11"], label: "Fullscreen" },
 ];
+
+type PresenceMessage = {
+  roomId: string;
+  userId: string;
+  role: string;
+  event: string;
+};
+
+function getWebSocketUrl() {
+  const apiUrl = new URL(import.meta.env.VITE_API_URL ?? window.location.origin);
+  apiUrl.protocol = apiUrl.protocol === "https:" ? "wss:" : "ws:";
+  apiUrl.pathname = "/ws";
+  apiUrl.search = "";
+  apiUrl.hash = "";
+  return apiUrl.toString();
+}
 
 /* ─── helpers ─── */
 function useTimer() {
@@ -832,6 +850,8 @@ export default function InterviewRoom() {
   const { roomId } = useParams<{ roomId: string }>();
   const timer = useTimer();
   const containerRef = useRef<HTMLDivElement>(null);
+  const [presenceStatus, setPresenceStatus] = useState("Connecting");
+  const [presenceMessages, setPresenceMessages] = useState<PresenceMessage[]>([]);
 
   const [mic, setMic] = useState(true);
   const [cam, setCam] = useState(true);
@@ -845,6 +865,80 @@ export default function InterviewRoom() {
   const [consoleVisible, setConsoleVisible] = useState(true);
   const [shortcutOpen, setShortcutOpen] = useState(false);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
+
+  useEffect(() => {
+    let isActive = true;
+    setPresenceStatus("Connecting");
+    setPresenceMessages([]);
+
+    if (!roomId) {
+      setPresenceStatus("Missing room ID");
+      return;
+    }
+
+    const token = getToken();
+    if (!token) {
+      setPresenceStatus("Missing authentication token");
+      return;
+    }
+
+    let unsubscribe: (() => void) | undefined;
+    const client = new Client({
+      brokerURL: getWebSocketUrl(),
+      connectHeaders: { Authorization: `Bearer ${token}` },
+      reconnectDelay: 0,
+      onConnect: () => {
+        if (isActive) {
+          setPresenceStatus("Connected");
+        }
+        const subscription = client.subscribe(
+          `/topic/interview/${roomId}/presence`,
+          (message) => {
+            try {
+              const presence = JSON.parse(message.body) as PresenceMessage;
+              console.info("Interview presence event:", presence);
+              if (isActive) {
+                setPresenceMessages((events) => [...events, presence].slice(-5));
+              }
+            } catch {
+              console.error("Unable to parse interview presence message", message.body);
+            }
+          },
+        );
+
+        unsubscribe = () => subscription.unsubscribe();
+        client.publish({
+          destination: `/app/interview/${roomId}/join`,
+          body: JSON.stringify({}),
+        });
+      },
+      onStompError: (frame) => {
+        console.error("Interview presence STOMP error:", frame.headers.message, frame.body);
+        if (isActive) {
+          setPresenceStatus("STOMP error");
+        }
+      },
+      onWebSocketError: (event) => {
+        console.error("Interview presence WebSocket error:", event);
+        if (isActive) {
+          setPresenceStatus("WebSocket error");
+        }
+      },
+      onWebSocketClose: () => {
+        if (isActive) {
+          setPresenceStatus("Disconnected");
+        }
+      },
+    });
+
+    client.activate();
+
+    return () => {
+      isActive = false;
+      unsubscribe?.();
+      void client.deactivate();
+    };
+  }, [roomId]);
 
   /* ── Fullscreen ── */
   async function toggleFullscreen() {
@@ -923,6 +1017,15 @@ export default function InterviewRoom() {
 
       <div ref={containerRef} data-room-id={roomId} style={{ height: "100dvh", background: C.bg, display: "flex", flexDirection: "column", overflow: "hidden", fontFamily: INTER }}>
         <Navbar timer={timer} onLeave={() => { screenStream?.getTracks().forEach(t => t.stop()); window.location.href = "/interviewer"; }} />
+
+        <div style={{ position: "fixed", left: 18, bottom: 18, zIndex: 50, maxWidth: 360, borderRadius: 8, padding: "7px 10px", background: "rgba(15,23,42,0.92)", border: `1px solid ${C.border}`, color: C.ts, fontSize: 10, fontFamily: MONO }}>
+          <div>STOMP presence: {presenceStatus}</div>
+          {presenceMessages.slice(-2).map((presence) => (
+            <div key={`${presence.userId}-${presence.event}`} style={{ color: C.emerald, marginTop: 3 }}>
+              {presence.role} {presence.event.toLowerCase()} ({presence.userId})
+            </div>
+          ))}
+        </div>
 
         {/* Body */}
         <div style={{ display: "flex", flex: 1, overflow: "hidden", padding: "62px 10px 10px 10px", gap: 10 }}>
