@@ -10,9 +10,14 @@ import {
   ResponsiveContainer, AreaChart, Area,
 } from "recharts";
 import { DashboardLayout } from "../components/DashboardLayout";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useEffect, useState } from "react";
 import { getInterviewerDashboard } from "../../services/interviewerService";
+import {
+  getCurrentInterviewRooms,
+  startInterviewRoom,
+  type InterviewRoomRecord,
+} from "../../services/interviewRoomService";
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard className="w-4 h-4" /> },
@@ -266,7 +271,7 @@ function CreateSection() {
 }
 
 /* ── Rooms ── */
-function RoomsSection() {
+export function RoomsSection() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -312,7 +317,7 @@ function RoomsSection() {
                       <Copy className="w-3.5 h-3.5" />
                     </button>
                     <Link
-                      to="/interview-room"
+                      to={`/interview-room/${r.id}`}
                       className="bg-[#0d1b2a] text-white text-xs px-4 py-2 rounded-lg hover:bg-[#1a2f45] transition-colors"
                       style={{ fontWeight: 600 }}
                     >
@@ -339,6 +344,77 @@ function RoomsSection() {
 }
 
 /* ── Profile ── */
+function CurrentRoomsSection() {
+  const navigate = useNavigate();
+  const [rooms, setRooms] = useState<InterviewRoomRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [startingRoomId, setStartingRoomId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const loadRooms = async () => {
+      try {
+        setRooms(await getCurrentInterviewRooms());
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to load interview rooms.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadRooms();
+  }, []);
+
+  const enterRoom = async (room: InterviewRoomRecord) => {
+    setStartingRoomId(room.roomId);
+    setError("");
+    try {
+      if (room.status === "CREATED") {
+        await startInterviewRoom(room.roomId);
+      }
+      navigate(`/interview-room/${room.roomId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to start the interview.");
+    } finally {
+      setStartingRoomId(null);
+    }
+  };
+
+  return (
+    <div>
+      <SectionHeader title="Interview Rooms" subtitle="Manage your scheduled and active interview sessions." />
+      {error && <p className="mb-3 text-sm text-rose-600">{error}</p>}
+      {loading ? (
+        <p className="text-sm text-[#4a6080]">Loading interview rooms...</p>
+      ) : rooms.length === 0 ? (
+        <p className="text-sm text-[#4a6080]">No active or scheduled interview rooms.</p>
+      ) : (
+        <div className="space-y-3">
+          {rooms.map((room) => (
+            <div key={room.roomId} className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-[#0d1b2a]" style={{ fontWeight: 600 }}>{room.title}</h3>
+                  <p className="mt-1 text-xs text-[#4a6080]">{room.candidateEmail} · {room.targetRole}</p>
+                  <p className="mt-3 text-xs text-[#4a6080]">{room.roomId} · {room.interviewType}</p>
+                </div>
+                <button
+                  onClick={() => enterRoom(room)}
+                  disabled={startingRoomId === room.roomId}
+                  className="bg-[#0d1b2a] text-white text-xs px-4 py-2 rounded-lg hover:bg-[#1a2f45] transition-colors disabled:opacity-60"
+                  style={{ fontWeight: 600 }}
+                >
+                  {startingRoomId === room.roomId ? "Starting..." : room.status === "CREATED" ? "Start" : "Enter"}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProfileSection({ onEdit }: { onEdit: () => void }) {
   const specializations = ["Frontend", "System Design", "Behavioral", "Full-Stack", "Data Engineering"];
   return (
@@ -532,7 +608,7 @@ export default function InterviewerDashboard() {
   const sections: Record<string, React.ReactNode> = {
     dashboard: <DashboardSection />,
     create: <CreateSection />,
-    rooms: <RoomsSection />,
+    rooms: <CurrentRoomsSection />,
     profile: <ProfileSection onEdit={() => setActiveSection("edit-profile")} />,
     "edit-profile": <EditProfileSection onBack={() => setActiveSection("profile")} />,
   };

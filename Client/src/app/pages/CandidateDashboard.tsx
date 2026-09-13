@@ -58,6 +58,11 @@ import {
   getQuestionById,
 } from "../../services/candidateService";
 import { getHistory, getInterviewById } from "../../services/history";
+import {
+  getCurrentInterviewRooms,
+  joinInterviewRoom,
+  type InterviewRoomRecord,
+} from "../../services/interviewRoomService";
 
 // User
 
@@ -1089,7 +1094,7 @@ function MockSection({
   );
 }
 
-function RoomsSection({ rooms }: { rooms: Room[] }) {
+export function RoomsSection({ rooms }: { rooms: Room[] }) {
   return (
     <div>
       <SectionHeader
@@ -1156,6 +1161,79 @@ function RoomsSection({ rooms }: { rooms: Room[] }) {
                   <button className="text-[#4a6080] text-xs hover:text-[#0d1b2a] flex items-center gap-1">
                     View replay <ChevronRight className="w-3 h-3" />
                   </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CurrentRoomsSection() {
+  const navigate = useNavigate();
+  const [rooms, setRooms] = useState<InterviewRoomRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [joiningRoomId, setJoiningRoomId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const loadRooms = async () => {
+      try {
+        setRooms(await getCurrentInterviewRooms());
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to load interview rooms.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadRooms();
+  }, []);
+
+  const joinRoom = async (roomId: string) => {
+    setJoiningRoomId(roomId);
+    setError("");
+    try {
+      await joinInterviewRoom(roomId);
+      navigate(`/interview-room/${roomId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to join this interview room.");
+    } finally {
+      setJoiningRoomId(null);
+    }
+  };
+
+  return (
+    <div>
+      <SectionHeader title="My Rooms" subtitle="Join interviews once the interviewer has started them." />
+      {error && <p className="mb-3 text-sm text-rose-600">{error}</p>}
+      {loading ? (
+        <p className="text-sm text-[#4a6080]">Loading interview rooms...</p>
+      ) : rooms.length === 0 ? (
+        <EmptyState icon={<Video className="w-5 h-5" />} title="No rooms yet" subtitle="Scheduled interview rooms will appear here." />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {rooms.map((room) => (
+            <div key={room.roomId} className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-[#0d1b2a]" style={{ fontWeight: 600 }}>{room.title}</h3>
+                  <p className="mt-1 text-xs text-[#4a6080]">{room.targetRole}</p>
+                  <p className="mt-3 text-xs text-[#4a6080]">{room.roomId} · {room.interviewType}</p>
+                </div>
+                {room.status === "ACTIVE" ? (
+                  <button
+                    onClick={() => joinRoom(room.roomId)}
+                    disabled={joiningRoomId === room.roomId}
+                    className="bg-[#00bfa6] text-[#0d1b2a] text-xs px-4 py-2 rounded-lg hover:bg-[#00d4b8] transition-colors disabled:opacity-60"
+                    style={{ fontWeight: 600 }}
+                  >
+                    {joiningRoomId === room.roomId ? "Joining..." : "Join Room"}
+                  </button>
+                ) : (
+                  <span className="text-xs text-amber-700">Waiting for interviewer</span>
                 )}
               </div>
             </div>
@@ -1912,7 +1990,7 @@ export default function CandidateDashboard() {
           />
         );
       case "rooms":
-        return <RoomsSection rooms={dashboardData.rooms ?? []} />;
+        return <CurrentRoomsSection />;
       case "profile":
         return (
           <ProfileSection

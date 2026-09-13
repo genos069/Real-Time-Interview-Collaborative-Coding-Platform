@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useParams } from "react-router";
 import {
   Mic, MicOff, Video, VideoOff, Monitor, MonitorOff, Hand, Maximize2, Minimize2,
   Users, PhoneOff, MessageSquare, Code2, Send, ChevronDown, Play, RotateCcw,
@@ -828,6 +829,7 @@ function ShortcutModal({ onClose }: { onClose: () => void }) {
 
 /* ─── Root ─── */
 export default function InterviewRoom() {
+  const { roomId } = useParams<{ roomId: string }>();
   const timer = useTimer();
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -919,7 +921,7 @@ export default function InterviewRoom() {
         ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.2)}
       `}</style>
 
-      <div ref={containerRef} style={{ height: "100dvh", background: C.bg, display: "flex", flexDirection: "column", overflow: "hidden", fontFamily: INTER }}>
+      <div ref={containerRef} data-room-id={roomId} style={{ height: "100dvh", background: C.bg, display: "flex", flexDirection: "column", overflow: "hidden", fontFamily: INTER }}>
         <Navbar timer={timer} onLeave={() => { screenStream?.getTracks().forEach(t => t.stop()); window.location.href = "/interviewer"; }} />
 
         {/* Body */}

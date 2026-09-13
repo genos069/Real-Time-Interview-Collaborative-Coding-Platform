@@ -11,97 +11,120 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
 @Configuration
 public class SecurityConfig {
 
-        // JWT Filter
-        private final JwtFilter jwtFilter;
+    // JWT Filter
+    private final JwtFilter jwtFilter;
 
-        // Constructor
-        public SecurityConfig(
-                        JwtFilter jwtFilter) {
-                this.jwtFilter = jwtFilter;
-        }
+    // Constructor
+    public SecurityConfig(
+            JwtFilter jwtFilter) {
+        this.jwtFilter = jwtFilter;
+    }
 
-        @Bean
-        public SecurityFilterChain securityFilterChain(
-                        HttpSecurity http) throws Exception {
+    @Bean
+    public SecurityFilterChain securityFilterChain(
+            HttpSecurity http) throws Exception {
 
-                http
+        http
 
-                                // Disable CSRF
-                                .csrf(csrf -> csrf.disable())
+                // Disable CSRF
+                .csrf(csrf -> csrf.disable())
 
-                                // Enable CORS
-                                .cors(cors -> {
-                                })
+                // Enable CORS
+                .cors(cors -> {
+                })
 
-                                // Authorization Rules
-                                .authorizeHttpRequests(auth -> auth
+                // Authorization Rules
+                .authorizeHttpRequests(auth -> auth
 
-                                                // Public APIs
-                                                .requestMatchers(
-                                                                "/api/auth/register",
-                                                                "/api/auth/login",
-                                                                "/api/auth/register-candidate",
-                                                                "/api/auth/login-candidate",
-                                                                "/api/auth/register-interviewer",
-                                                                "/api/auth/login-interviewer",
-                                                                "/api/auth/test")
-                                                .permitAll()
+                        // Public APIs
+                        .requestMatchers(
+                                "/api/auth/register",
+                                "/api/auth/login",
+                                "/api/auth/register-candidate",
+                                "/api/auth/login-candidate",
+                                "/api/auth/register-interviewer",
+                                "/api/auth/login-interviewer",
+                                "/api/auth/test")
+                        .permitAll()
 
-                                                // AI MOCK APIs (PROTECTED)
-                                                .requestMatchers("/api/interview/**").authenticated()
-                                                .requestMatchers("/api/history/**").authenticated()
+                        // AI MOCK APIs
+                        .requestMatchers("/api/interview/**")
+                        .authenticated()
 
-                                                // Interviewer Only APIs
-                                                .requestMatchers(
-                                                                HttpMethod.POST,
-                                                                "/api/interviews")
-                                                .hasRole("INTERVIEWER")
+                        .requestMatchers("/api/history/**")
+                        .authenticated()
 
-                                                .requestMatchers(
-                                                                HttpMethod.PUT,
-                                                                "/api/interviews/**")
-                                                .hasRole("INTERVIEWER")
+                        // Interviewer Only APIs
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/api/interviews")
+                        .hasRole("INTERVIEWER")
 
-                                                .requestMatchers(
-                                                                HttpMethod.DELETE,
-                                                                "/api/interviews/**")
-                                                .hasRole("INTERVIEWER")
+                        .requestMatchers(
+                                HttpMethod.PUT,
+                                "/api/interviews/*/score/candidate")
+                        .hasRole("INTERVIEWER")
 
-                                                // Authenticated APIs
-                                                .anyRequest().authenticated())
+                        // Candidate Only APIs
+                        .requestMatchers(
+                                HttpMethod.PUT,
+                                "/api/interviews/*/score/interviewer")
+                        .hasRole("CANDIDATE")
 
-                                // JWT Filter
-                                .addFilterBefore(
-                                                jwtFilter,
-                                                UsernamePasswordAuthenticationFilter.class);
+                        // Other Interviewer PUT APIs
+                        .requestMatchers(
+                                HttpMethod.PUT,
+                                "/api/interviews/**")
+                        .hasRole("INTERVIEWER")
 
-                return http.build();
-        }
+                        .requestMatchers(
+                                HttpMethod.DELETE,
+                                "/api/interviews/**")
+                        .hasRole("INTERVIEWER")
 
-        // Password Encoder
-        @Bean
-        public BCryptPasswordEncoder passwordEncoder() {
-                return new BCryptPasswordEncoder();
-        }
+                        // WebSocket connection
+                        .requestMatchers("/ws/**")
+                        .permitAll()
 
-        // CORS Configuration
-        @Bean
-        public CorsConfigurationSource corsConfigurationSource() {
+                        // Other authenticated APIs
+                        .anyRequest()
+                        .authenticated()
+                )
 
-                CorsConfiguration configuration = new CorsConfiguration();
+                // JWT Filter
+                .addFilterBefore(
+                        jwtFilter,
+                        UsernamePasswordAuthenticationFilter.class
+                );
 
-                configuration.addAllowedOrigin("http://localhost:5173");
-                configuration.addAllowedHeader("*");
-                configuration.addAllowedMethod("*");
-                configuration.setAllowCredentials(true);
+        return http.build();
+    }
 
-                UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+    // Password Encoder
+    @Bean
+    public BCryptPasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
 
-                source.registerCorsConfiguration("/**", configuration);
+    // CORS Configuration
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
 
-                return source;
-        }
+        CorsConfiguration configuration = new CorsConfiguration();
+
+        configuration.addAllowedOrigin("http://localhost:5173");
+        configuration.addAllowedHeader("*");
+        configuration.addAllowedMethod("*");
+        configuration.setAllowCredentials(true);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+
+        source.registerCorsConfiguration("/**", configuration);
+
+        return source;
+    }
 }

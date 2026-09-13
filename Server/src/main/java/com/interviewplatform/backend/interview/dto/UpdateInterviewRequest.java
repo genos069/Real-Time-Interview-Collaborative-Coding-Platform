@@ -1,4 +1,4 @@
-package com.interviewplatform.backend.dto;
+package com.interviewplatform.backend.interview.dto;
 
 import java.time.LocalDateTime;
 import java.util.List;
