@@ -1,4 +1,4 @@
-# Interview AI Platform - Codex Instructions
+# Interview AI Platform - Anti Gravity Instructions
 
 ## Project Overview
 

@@ -1,6 +1,8 @@
 package com.interviewplatform.backend.interview.controller;
 
 import com.interviewplatform.backend.interview.dto.CreateInterviewRequest;
+import com.interviewplatform.backend.interview.dto.RunInterviewCodeRequest;
+import com.interviewplatform.backend.interview.dto.RunInterviewCodeResponse;
 import com.interviewplatform.backend.interview.model.Interview;
 import com.interviewplatform.backend.interview.service.InterviewService;
 import org.springframework.http.HttpStatus;
@@ -129,5 +131,30 @@ public class InterviewController {
                 );
 
         return ResponseEntity.ok(interview);
+    }
+
+    // Get code snapshot
+    @GetMapping("/{roomId}/code")
+    public ResponseEntity<Map<String, String>> getCodeSnapshot(
+            @PathVariable String roomId
+    ) {
+
+        Map<String, String> snapshot =
+                interviewService.getCodeSnapshot(roomId);
+
+        return ResponseEntity.ok(snapshot);
+    }
+
+    // Run interview code directly
+    @PostMapping("/{roomId}/run")
+    public ResponseEntity<RunInterviewCodeResponse> runCode(
+            @PathVariable String roomId,
+            @RequestBody RunInterviewCodeRequest request
+    ) {
+
+        RunInterviewCodeResponse response =
+                interviewService.runCode(roomId, request);
+
+        return ResponseEntity.ok(response);
     }
 }

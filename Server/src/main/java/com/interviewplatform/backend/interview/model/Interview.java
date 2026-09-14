@@ -6,6 +6,8 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 
 @Document(collection = "interview_rooms")
 public class Interview {
@@ -45,6 +47,13 @@ public class Interview {
     private Integer candidateScore;
 
     private Integer interviewerScore;
+
+    // Code state snapshot
+    private String currentCode;
+
+    private String language;
+
+    private Map<String, String> codes;
 
 
     // Constructor
@@ -189,5 +198,32 @@ public class Interview {
 
     public void setInterviewerScore(Integer interviewerScore) {
         this.interviewerScore = interviewerScore;
+    }
+
+    public String getCurrentCode() {
+        return currentCode;
+    }
+
+    public void setCurrentCode(String currentCode) {
+        this.currentCode = currentCode;
+    }
+
+    public String getLanguage() {
+        return language;
+    }
+
+    public void setLanguage(String language) {
+        this.language = language;
+    }
+
+    public Map<String, String> getCodes() {
+        if (codes == null) {
+            codes = new HashMap<>();
+        }
+        return codes;
+    }
+
+    public void setCodes(Map<String, String> codes) {
+        this.codes = codes;
     }
 }

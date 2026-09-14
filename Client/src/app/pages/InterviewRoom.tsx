@@ -1,13 +1,20 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "react-router";
 import { Client } from "@stomp/stompjs";
 import { getToken, getUser, getUserRole } from "../bot/utils/auth";
+import { InterviewCodeEditor } from "../components/InterviewCodeEditor";
+import {
+  getInterviewCodeSnapshot,
+  runInterviewCode,
+  type CodeSyncMessage,
+  type RunInterviewCodeResponse,
+} from "../../services/interviewRoomService";
 import {
   Mic, MicOff, Video, VideoOff, Monitor, MonitorOff, Hand, Maximize2, Minimize2,
   Users, PhoneOff, MessageSquare, Code2, Send, ChevronDown, Play, RotateCcw,
   Map, WrapText, Expand, Wifi, Clock, Terminal, CheckCircle2, XCircle,
   Keyboard, X, Blend, Copy, ChevronRight, PenLine, Eraser, Minus,
-  Square, Circle, Type, Undo2, Trash2, Palette, MoreVertical,
+  Square, Circle, Type, Undo2, Trash2, Palette, MoreVertical, Loader2,
 } from "lucide-react";
 
 /* ─── constants ─── */
@@ -21,35 +28,41 @@ const C = {
   tp: "#F1F5F9", ts: "#94A3B8", tm: "#475569",
 };
 
-const LANGUAGES = ["JavaScript", "Python", "Java", "C++", "SQL", "Kotlin"];
-const CODE_STUBS: Record<string, string> = {
-  JavaScript: `
-function twoSum(nums, target) {
-  
-}
+export type SupportedInterviewLanguage = "Java" | "Python" | "C++";
 
-console.log(twoSum([2, 7, 11, 15], 9)); // [0, 1]
-`,
-  Python: `
-class Solution:
-    def twoSum(self, nums: List[int], target: int) -> List[int]:
-       
-`,
-  Java: `import java.util.HashMap;
-class Solution {
-    public int[] twoSum(int[] nums, int target) {
-       
+export const INTERVIEW_LANGUAGES: readonly SupportedInterviewLanguage[] = [
+  "Java",
+  "Python",
+  "C++",
+];
+
+export const INTERVIEW_STARTER_TEMPLATES: Record<SupportedInterviewLanguage, string> = {
+  Java: `public class Main {
+    public static void main(String[] args) {
+        // Write your solution here
     }
 }
 `,
-  "C++": `
-class Solution {
-public:
-    
-    
+  Python: `# Write your solution here
+`,
+  "C++": `#include <iostream>
+using namespace std;
+
+int main() {
+    // Write your solution here
+    return 0;
+}
+`,
 };
-`
-};
+
+export function normalizeInterviewLanguage(lang?: string | null): SupportedInterviewLanguage {
+  if (!lang) return "Java";
+  const lower = lang.toLowerCase().trim();
+  if (lower === "python" || lower === "python3") return "Python";
+  if (lower === "cpp" || lower === "c++") return "C++";
+  if (lower === "java") return "Java";
+  return "Java";
+}
 
 const SHORTCUTS = [
   { keys: ["Ctrl", "Enter"], label: "Run Code" },
@@ -97,21 +110,6 @@ function useTimer() {
   const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
   const sec = String(s % 60).padStart(2, "0");
   return `${h}:${m}:${sec}`;
-}
-
-function highlight(code: string) {
-  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const KW = /\b(function|const|let|var|return|if|else|for|while|new|class|import|export|default|from|of|in|typeof|instanceof|null|undefined|true|false|async|await|try|catch|finally|throw|this|super|extends|def|elif|pass|self|None|True|False|public|private|static|void|int|bool|string|number|type|interface)\b/g;
-  return code.split("\n").map(line => {
-    let h = esc(line);
-    h = h.replace(/(\/\/.*$|#.*$)/g, '<span style="color:#6A9955">$1</span>');
-    h = h.replace(/(&quot;[^&]*?&quot;|'[^']*?'|`[^`]*?`)/g, '<span style="color:#CE9178">$1</span>');
-    h = h.replace(KW, '<span style="color:#569CD6;font-weight:500">$1</span>');
-    h = h.replace(/\b(\d+\.?\d*)\b/g, '<span style="color:#B5CEA8">$1</span>');
-    h = h.replace(/(\w+)(?=\s*\()/g, '<span style="color:#DCDCAA">$1</span>');
-    h = h.replace(/\b([A-Z][A-Za-z0-9_]*)\b/g, '<span style="color:#4EC9B0">$1</span>');
-    return h;
-  }).join("\n");
 }
 
 function GlassCard({ children, className, style }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
@@ -788,97 +786,535 @@ function VideoPanel({
 }
 
 /* ─── Code Editor ─── */
-function CodeEditor() {
-  const [lang, setLang] = useState("JavaScript");
-  const [code, setCode] = useState(CODE_STUBS["JavaScript"]);
+interface CodeEditorProps {
+  roomId?: string;
+  stompClientRef?: React.RefObject<Client | null>;
+  onRegisterRemoteCodeHandler?: (handler: ((msg: CodeSyncMessage) => void) | null) => void;
+  currentUserId?: string;
+  userRole?: string;
+  isExecuting?: boolean;
+  onRunCode?: (lang: SupportedInterviewLanguage, code: string) => void;
+}
+
+function CodeEditor({
+  roomId: propRoomId,
+  stompClientRef,
+  onRegisterRemoteCodeHandler,
+  isExecuting = false,
+  onRunCode,
+}: CodeEditorProps) {
+  const { roomId: paramRoomId } = useParams<{ roomId: string }>();
+  const roomId = propRoomId || paramRoomId;
+
+  const [selectedLang, setSelectedLang] = useState<SupportedInterviewLanguage>("Java");
+  const [codes, setCodes] = useState<Record<SupportedInterviewLanguage, string>>({
+    Java: INTERVIEW_STARTER_TEMPLATES.Java,
+    Python: INTERVIEW_STARTER_TEMPLATES.Python,
+    "C++": INTERVIEW_STARTER_TEMPLATES["C++"],
+  });
   const [langOpen, setLangOpen] = useState(false);
   const [minimap, setMinimap] = useState(true);
   const [wrap, setWrap] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const mirrorRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
 
-  const lines = code.split("\n");
+  // Synchronization refs
+  const isRemoteUpdateRef = useRef<boolean>(false);
+  const hasReceivedRemoteEditRef = useRef<boolean>(false);
+  const lastSentCodeRef = useRef<string>("");
+  const lastReceivedCodeRef = useRef<string>("");
+  const publishTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectedLangRef = useRef<SupportedInterviewLanguage>(selectedLang);
+  const codesRef = useRef<Record<SupportedInterviewLanguage, string>>(codes);
 
-  function syncScroll() {
-    if (textareaRef.current && mirrorRef.current)
-      mirrorRef.current.scrollTop = textareaRef.current.scrollTop;
-  }
+  useEffect(() => {
+    selectedLangRef.current = selectedLang;
+  }, [selectedLang]);
 
-  function TBtn({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active?: boolean; onClick: () => void }) {
+  useEffect(() => {
+    codesRef.current = codes;
+  }, [codes]);
+
+  // Clean up debounce timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (publishTimeoutRef.current) {
+        clearTimeout(publishTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Fetch persistent code snapshot on mount / roomId change (Phase 4B integration)
+  useEffect(() => {
+    if (!roomId) return;
+    let isCancelled = false;
+
+    const loadSnapshot = async () => {
+      try {
+        const snapshot = await getInterviewCodeSnapshot(roomId);
+        if (isCancelled) return;
+
+        // Race condition prevention:
+        // If a newer live collaborative edit has already arrived over STOMP,
+        // do not overwrite it with an older REST snapshot!
+        if (hasReceivedRemoteEditRef.current) {
+          console.info(
+            "Skipping REST snapshot overwrite because newer live collaborative edit was already received."
+          );
+          return;
+        }
+
+        if (snapshot) {
+          const normalized = normalizeInterviewLanguage(snapshot.language);
+          const hasSavedCode =
+            typeof snapshot.currentCode === "string" && snapshot.currentCode.trim().length > 0;
+
+          setSelectedLang(normalized);
+          selectedLangRef.current = normalized;
+
+          const nextCodes: Record<SupportedInterviewLanguage, string> = { ...codesRef.current };
+          const raw = snapshot as Record<string, string>;
+          if (raw["code_Java"] && raw["code_Java"].trim().length > 0) {
+            nextCodes.Java = raw["code_Java"];
+          }
+          if (raw["code_Python"] && raw["code_Python"].trim().length > 0) {
+            nextCodes.Python = raw["code_Python"];
+          }
+          if (raw["code_C++"] && raw["code_C++"].trim().length > 0) {
+            nextCodes["C++"] = raw["code_C++"];
+          }
+          if (hasSavedCode) {
+            nextCodes[normalized] = snapshot.currentCode;
+          }
+
+          codesRef.current = nextCodes;
+          setCodes(nextCodes);
+
+          if (hasSavedCode) {
+            lastReceivedCodeRef.current = snapshot.currentCode;
+          }
+        }
+      } catch (err) {
+        // Fall back safely to default starter template without breaking the room
+        console.error("Failed to load interview code snapshot:", err);
+      }
+    };
+
+    loadSnapshot();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [roomId]);
+
+  // Register remote code handler with parent STOMP subscription
+  useEffect(() => {
+    if (!onRegisterRemoteCodeHandler) return;
+
+    const handleRemoteCode = (msg: CodeSyncMessage) => {
+      hasReceivedRemoteEditRef.current = true;
+
+      const incomingLang = msg.language ? normalizeInterviewLanguage(msg.language) : null;
+      const currentActiveLang = selectedLangRef.current;
+      const isLanguageChange = incomingLang !== null && incomingLang !== currentActiveLang;
+
+      // Check if this is a language-only change (code is null/undefined)
+      const isLanguageChangeOnly = msg.code === null || msg.code === undefined;
+
+      if (isLanguageChangeOnly) {
+        if (isLanguageChange && incomingLang) {
+          console.info(
+            `Remote language change received: "${incomingLang}" (switching from "${currentActiveLang}")`
+          );
+
+          // Cancel any pending debounced publish for previous language
+          if (publishTimeoutRef.current) {
+            clearTimeout(publishTimeoutRef.current);
+            publishTimeoutRef.current = null;
+          }
+
+          setSelectedLang(incomingLang);
+          selectedLangRef.current = incomingLang;
+          lastReceivedCodeRef.current = codesRef.current[incomingLang] ?? INTERVIEW_STARTER_TEMPLATES[incomingLang];
+        }
+        return;
+      }
+
+      // Otherwise, this message contains code content
+      if (typeof msg.code === "string") {
+        // If this is a language change, apply language switch immediately regardless of code content!
+        if (isLanguageChange && incomingLang) {
+          console.info(
+            `Remote code sync with language change: "${incomingLang}" (was "${currentActiveLang}")`
+          );
+          if (publishTimeoutRef.current) {
+            clearTimeout(publishTimeoutRef.current);
+            publishTimeoutRef.current = null;
+          }
+          setSelectedLang(incomingLang);
+          selectedLangRef.current = incomingLang;
+        } else {
+          // If in the same language, avoid redundant updates if code is identical to what we just sent
+          if (msg.code === lastSentCodeRef.current) {
+            return;
+          }
+        }
+
+        const targetLang = incomingLang || currentActiveLang;
+
+        // If targetLang is the active language, update lastReceivedCodeRef
+        if (targetLang === selectedLangRef.current) {
+          lastReceivedCodeRef.current = msg.code;
+        }
+
+        // Flag that an incoming remote update is being applied to prevent echo / infinite loop
+        isRemoteUpdateRef.current = true;
+
+        setCodes((prev) => {
+          const updated = {
+            ...prev,
+            [targetLang]: msg.code as string,
+          };
+          codesRef.current = updated;
+          return updated;
+        });
+
+        // Safely release the flag after the React render cycle and Monaco model update
+        setTimeout(() => {
+          isRemoteUpdateRef.current = false;
+        }, 50);
+      }
+    };
+
+    onRegisterRemoteCodeHandler(handleRemoteCode);
+
+    return () => {
+      onRegisterRemoteCodeHandler(null);
+    };
+  }, [onRegisterRemoteCodeHandler]);
+
+  // Publish helper with debounce
+  const publishCode = (codeToPublish: string, langToPublish: string) => {
+    if (publishTimeoutRef.current) {
+      clearTimeout(publishTimeoutRef.current);
+    }
+
+    publishTimeoutRef.current = setTimeout(() => {
+      const client = stompClientRef?.current;
+      if (client && client.connected && roomId) {
+        const payload: Partial<CodeSyncMessage> = {
+          roomId,
+          code: codeToPublish,
+          language: langToPublish,
+          cursorPosition: null,
+        };
+
+        client.publish({
+          destination: `/app/interview/${roomId}/code`,
+          body: JSON.stringify(payload),
+        });
+      }
+    }, 200);
+  };
+
+  const handleLanguageChange = (newLang: SupportedInterviewLanguage) => {
+    if (newLang === selectedLangRef.current) {
+      setLangOpen(false);
+      return;
+    }
+
+    setLangOpen(false);
+    setSelectedLang(newLang);
+    selectedLangRef.current = newLang;
+
+    // Clear any pending debounced code publish for the previous language
+    if (publishTimeoutRef.current) {
+      clearTimeout(publishTimeoutRef.current);
+      publishTimeoutRef.current = null;
+    }
+
+    // Publish language change immediately to STOMP with consistent code for new language
+    const client = stompClientRef?.current;
+    if (client && client.connected && roomId) {
+      const targetCode = codesRef.current[newLang] ?? INTERVIEW_STARTER_TEMPLATES[newLang];
+      lastSentCodeRef.current = targetCode;
+      lastReceivedCodeRef.current = targetCode;
+
+      const payload: Partial<CodeSyncMessage> = {
+        roomId,
+        language: newLang,
+        code: targetCode,
+        cursorPosition: null,
+      };
+
+      client.publish({
+        destination: `/app/interview/${roomId}/code`,
+        body: JSON.stringify(payload),
+      });
+    }
+  };
+
+  const handleCodeChange = (newCode: string) => {
+    // 1. If this change was triggered by an incoming remote update being applied, do NOT publish
+    if (isRemoteUpdateRef.current) {
+      return;
+    }
+
+    // 2. If the code is identical to what was just received or sent, do NOT publish
+    if (newCode === lastReceivedCodeRef.current || newCode === lastSentCodeRef.current) {
+      return;
+    }
+
+    // 3. Local edit: update local state and publish via STOMP
+    setCodes((prev) => {
+      const updated = {
+        ...prev,
+        [selectedLang]: newCode,
+      };
+      codesRef.current = updated;
+      return updated;
+    });
+
+    lastSentCodeRef.current = newCode;
+    publishCode(newCode, selectedLang);
+  };
+
+  const handleReset = () => {
+    const starter = INTERVIEW_STARTER_TEMPLATES[selectedLang];
+    setCodes((prev) => {
+      const updated = {
+        ...prev,
+        [selectedLang]: starter,
+      };
+      codesRef.current = updated;
+      return updated;
+    });
+
+    if (publishTimeoutRef.current) {
+      clearTimeout(publishTimeoutRef.current);
+    }
+
+    lastSentCodeRef.current = starter;
+    lastReceivedCodeRef.current = starter;
+
+    const client = stompClientRef?.current;
+    if (client && client.connected && roomId) {
+      client.publish({
+        destination: `/app/interview/${roomId}/code`,
+        body: JSON.stringify({
+          roomId,
+          code: starter,
+          language: selectedLang,
+          cursorPosition: null,
+        }),
+      });
+    }
+  };
+
+  const handleCopy = () => {
+    const currentCode = codes[selectedLang] ?? "";
+    navigator.clipboard.writeText(currentCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  function TBtn({
+    icon,
+    label,
+    active,
+    onClick,
+  }: {
+    icon: React.ReactNode;
+    label: string;
+    active?: boolean;
+    onClick: () => void;
+  }) {
     const [hov, setHov] = useState(false);
     return (
-      <button onClick={onClick} title={label} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)} style={{
-        width: 27, height: 27, borderRadius: 7, border: "none", cursor: "pointer", transition: "all 0.15s",
-        background: active ? `${C.blue}25` : hov ? "rgba(255,255,255,0.08)" : "transparent",
-        color: active ? C.blue : hov ? C.tp : C.ts, display: "flex", alignItems: "center", justifyContent: "center",
-      }}>{icon}</button>
+      <button
+        onClick={onClick}
+        title={label}
+        onMouseEnter={() => setHov(true)}
+        onMouseLeave={() => setHov(false)}
+        style={{
+          width: 27,
+          height: 27,
+          borderRadius: 7,
+          border: "none",
+          cursor: "pointer",
+          transition: "all 0.15s",
+          background: active
+            ? `${C.blue}25`
+            : hov
+            ? "rgba(255,255,255,0.08)"
+            : "transparent",
+          color: active ? C.blue : hov ? C.tp : C.ts,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {icon}
+      </button>
     );
   }
+
+  const activeCode = codes[selectedLang] ?? INTERVIEW_STARTER_TEMPLATES[selectedLang];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", fontFamily: INTER }}>
       {/* Toolbar */}
-      <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 10px", height: 40, background: C.surface, borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 7,
+          padding: "0 10px",
+          height: 40,
+          background: C.surface,
+          borderBottom: `1px solid ${C.border}`,
+          flexShrink: 0,
+        }}
+      >
+        {/* Language Selector Dropdown - ONLY Java, Python, C++ */}
         <div style={{ position: "relative" }}>
-          <button onClick={() => setLangOpen(!langOpen)} style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.06)", border: `1px solid ${C.border}`, borderRadius: 7, padding: "3px 9px", cursor: "pointer", color: C.ts, fontSize: 11, fontWeight: 500, fontFamily: INTER }}>
-            <Code2 size={11} color={C.blue} /> {lang} <ChevronDown size={10} />
+          <button
+            onClick={() => setLangOpen(!langOpen)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              background: "rgba(255,255,255,0.06)",
+              border: `1px solid ${C.border}`,
+              borderRadius: 7,
+              padding: "3px 9px",
+              cursor: "pointer",
+              color: C.ts,
+              fontSize: 11,
+              fontWeight: 500,
+              fontFamily: INTER,
+            }}
+          >
+            <Code2 size={11} color={C.blue} /> {selectedLang} <ChevronDown size={10} />
           </button>
           {langOpen && (
-            <div style={{ position: "absolute", top: 34, left: 0, zIndex: 100, background: C.elevated, border: `1px solid ${C.border}`, borderRadius: 11, overflow: "hidden", minWidth: 150, boxShadow: "0 20px 50px rgba(0,0,0,0.6)" }}>
-              {LANGUAGES.map(l => (
-                <button key={l} onClick={() => { setLang(l); setCode(CODE_STUBS[l] ?? `// ${l}\n`); setLangOpen(false); }} style={{
-                  width: "100%", textAlign: "left", padding: "7px 13px", border: "none", cursor: "pointer", fontFamily: INTER, fontSize: 12, transition: "background 0.1s",
-                  background: l === lang ? `${C.blue}18` : "transparent", color: l === lang ? C.blue : C.ts, fontWeight: l === lang ? 600 : 400,
-                }}
-                  onMouseEnter={e => { if (l !== lang) (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.05)"; }}
-                  onMouseLeave={e => { if (l !== lang) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-                >{l}</button>
+            <div
+              style={{
+                position: "absolute",
+                top: 34,
+                left: 0,
+                zIndex: 100,
+                background: C.elevated,
+                border: `1px solid ${C.border}`,
+                borderRadius: 11,
+                overflow: "hidden",
+                minWidth: 150,
+                boxShadow: "0 20px 50px rgba(0,0,0,0.6)",
+              }}
+            >
+              {INTERVIEW_LANGUAGES.map((l) => (
+                <button
+                  key={l}
+                  onClick={() => handleLanguageChange(l)}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "7px 13px",
+                    border: "none",
+                    cursor: "pointer",
+                    fontFamily: INTER,
+                    fontSize: 12,
+                    transition: "background 0.1s",
+                    background: l === selectedLang ? `${C.blue}18` : "transparent",
+                    color: l === selectedLang ? C.blue : C.ts,
+                    fontWeight: l === selectedLang ? 600 : 400,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (l !== selectedLang)
+                      (e.currentTarget as HTMLButtonElement).style.background =
+                        "rgba(255,255,255,0.05)";
+                  }}
+                  onMouseLeave={(e) => {
+                    if (l !== selectedLang)
+                      (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                  }}
+                >
+                  {l}
+                </button>
               ))}
             </div>
           )}
         </div>
+
         <div style={{ flex: 1 }} />
-        <TBtn icon={<Map size={12} />} label="Minimap" active={minimap} onClick={() => setMinimap(!minimap)} />
-        <TBtn icon={<WrapText size={12} />} label="Word Wrap" active={wrap} onClick={() => setWrap(!wrap)} />
-        <TBtn icon={<Copy size={12} />} label="Copy" onClick={() => navigator.clipboard.writeText(code)} />
-        <TBtn icon={<RotateCcw size={12} />} label="Reset" onClick={() => setCode(CODE_STUBS[lang] ?? "")} />
+
+        <TBtn
+          icon={<Map size={12} />}
+          label={minimap ? "Hide Minimap" : "Show Minimap"}
+          active={minimap}
+          onClick={() => setMinimap(!minimap)}
+        />
+        <TBtn
+          icon={<WrapText size={12} />}
+          label={wrap ? "Disable Word Wrap" : "Enable Word Wrap"}
+          active={wrap}
+          onClick={() => setWrap(!wrap)}
+        />
+        <TBtn
+          icon={copied ? <CheckCircle2 size={12} color={C.emerald} /> : <Copy size={12} />}
+          label={copied ? "Copied!" : "Copy Code"}
+          onClick={handleCopy}
+        />
+        <TBtn
+          icon={<RotateCcw size={12} />}
+          label="Reset to Boilerplate"
+          onClick={handleReset}
+        />
         <div style={{ width: 1, height: 16, background: C.border, margin: "0 3px" }} />
-        <button style={{
-          display: "flex", alignItems: "center", gap: 5,
-          background: `linear-gradient(135deg,${C.blue},#1D4ED8)`,
-          border: "none", borderRadius: 7, padding: "4px 12px", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer",
-          fontFamily: INTER, boxShadow: `0 3px 12px ${C.blue}40`,
-        }}><Play size={10} /> Run</button>
+        {/* Run Button - connected to backend execution */}
+        <button
+          onClick={() => onRunCode?.(selectedLang, activeCode)}
+          disabled={isExecuting}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            background: isExecuting
+              ? "rgba(255,255,255,0.12)"
+              : `linear-gradient(135deg,${C.blue},#1D4ED8)`,
+            border: "none",
+            borderRadius: 7,
+            padding: "4px 12px",
+            color: isExecuting ? C.ts : "#fff",
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: isExecuting ? "not-allowed" : "pointer",
+            fontFamily: INTER,
+            boxShadow: isExecuting ? "none" : `0 3px 12px ${C.blue}40`,
+            opacity: isExecuting ? 0.75 : 1,
+            transition: "all 0.15s ease",
+          }}
+        >
+          {isExecuting ? (
+            <>
+              <Loader2 size={10} style={{ animation: "spin 1s linear infinite" }} /> Running...
+            </>
+          ) : (
+            <>
+              <Play size={10} /> Run
+            </>
+          )}
+        </button>
       </div>
 
-      {/* Editor */}
-      <div style={{ flex: 1, display: "flex", overflow: "hidden", background: "#0D1117" }}>
-        {/* Line numbers */}
-        <div style={{ width: 44, flexShrink: 0, background: "#0D1117", borderRight: `1px solid ${C.border}`, overflow: "hidden", paddingTop: 12, userSelect: "none" }}>
-          {lines.map((_, i) => (
-            <div key={i} style={{ height: 20, lineHeight: "20px", textAlign: "right", paddingRight: 9, color: C.tm, fontSize: 11, fontFamily: MONO }}>{i + 1}</div>
-          ))}
-        </div>
-        {/* Highlight + textarea */}
-        <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
-          <div ref={mirrorRef} aria-hidden="true" style={{ position: "absolute", inset: 0, padding: "12px 12px", fontFamily: MONO, fontSize: 12.5, lineHeight: "20px", color: "#D4D4D4", whiteSpace: wrap ? "pre-wrap" : "pre", overflow: "hidden", pointerEvents: "none", wordBreak: wrap ? "break-all" : "normal" }}
-            dangerouslySetInnerHTML={{ __html: highlight(code) + " " }} />
-          <textarea ref={textareaRef} value={code} onChange={e => setCode(e.target.value)} onScroll={syncScroll} spellCheck={false} style={{
-            position: "absolute", inset: 0, padding: "12px 12px", fontFamily: MONO, fontSize: 12.5, lineHeight: "20px",
-            background: "transparent", color: "transparent", caretColor: "#AEAFAD",
-            border: "none", outline: "none", resize: "none", whiteSpace: wrap ? "pre-wrap" : "pre", overflow: "auto", tabSize: 2,
-          }} />
-        </div>
-        {/* Minimap */}
-        {minimap && (
-          <div style={{ width: 64, flexShrink: 0, background: "#0a0f1a", borderLeft: `1px solid ${C.border}`, overflow: "hidden", padding: "12px 5px", opacity: 0.55 }}>
-            {lines.slice(0, 50).map((line, i) => (
-              <div key={i} style={{ height: 2.5, marginBottom: 0.8 }}>
-                {line.trim() && <div style={{ height: "100%", width: `${Math.min(100, line.length * 1.4)}%`, background: line.trim().startsWith("//") || line.trim().startsWith("#") ? "#3F4B3B" : "#2D4A7A", borderRadius: 1 }} />}
-              </div>
-            ))}
-          </div>
-        )}
+      {/* Monaco Editor */}
+      <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
+        <InterviewCodeEditor
+          value={activeCode}
+          language={selectedLang}
+          onChange={handleCodeChange}
+          minimap={minimap}
+          wordWrap={wrap}
+        />
       </div>
     </div>
   );
@@ -932,45 +1368,373 @@ function ChatPanel() {
 }
 
 /* ─── Console ─── */
-function ConsolePanel() {
+interface ConsolePanelProps {
+  executionResult: RunInterviewCodeResponse | null;
+  isExecuting: boolean;
+}
+
+function ConsolePanel({ executionResult, isExecuting }: ConsolePanelProps) {
   type CTab = "console" | "output";
   const [tab, setTab] = useState<CTab>("console");
 
-  const logs = [
-    { t: "log", text: "[14:07:02] Running test suite…" },
-    { t: "log", text: "[14:07:02] ✓ Test 1: nums=[2,7,11,15], target=9 → [0,1]" },
-    { t: "success", text: "[14:07:02] ✓ Test 2: nums=[3,2,4], target=6 → [1,2]" },
-    { t: "success", text: "[14:07:02] ✓ Test 3: nums=[3,3], target=6 → [0,1]" },
-    { t: "warn", text: "[14:07:02] ⚠ Runtime: 76ms · O(n) · Mem: 44MB" },
-  ];
-  const lc = (t: string) => t === "success" ? C.emerald : t === "warn" ? C.amber : t === "error" ? C.rose : C.ts;
+  const normalizedStatus = (executionResult?.status ?? "").toUpperCase();
+  const isSuccess =
+    Boolean(executionResult) &&
+    (normalizedStatus === "SUCCESS" ||
+      (executionResult?.exitCode === 0 && (!executionResult.error || !executionResult.error.trim())));
+
+  const isFailed =
+    Boolean(executionResult) &&
+    !isSuccess &&
+    (normalizedStatus === "ERROR" ||
+      normalizedStatus === "COMPILE_ERROR" ||
+      normalizedStatus === "RUNTIME_ERROR" ||
+      normalizedStatus === "EXECUTION_ERROR" ||
+      (executionResult?.exitCode !== null && executionResult?.exitCode !== undefined && executionResult.exitCode !== 0) ||
+      Boolean(executionResult?.error && executionResult.error.trim()));
+
+  let failureLabel = "Execution Error";
+  if (normalizedStatus === "COMPILE_ERROR" || executionResult?.error?.includes("error:")) {
+    failureLabel = "Compile Error";
+  } else if (
+    normalizedStatus === "RUNTIME_ERROR" ||
+    executionResult?.error?.includes("Exception") ||
+    executionResult?.error?.includes("Traceback")
+  ) {
+    failureLabel = "Runtime Error";
+  } else if (isFailed) {
+    failureLabel = "Failed";
+  }
+
+  const formatTime = (t?: string) => {
+    if (!t || t === "0") return "";
+    const num = parseFloat(t);
+    return isNaN(num) ? t : `${num.toFixed(2)}s`;
+  };
+
+  const formatMemory = (m?: string) => {
+    if (!m || m === "0") return "";
+    const num = parseInt(m, 10);
+    if (isNaN(num)) return m;
+    if (num > 1024) return `${(num / 1024).toFixed(1)} MB`;
+    return `${num} KB`;
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", fontFamily: INTER }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 3, padding: "6px 10px", borderBottom: `1px solid ${C.border}`, background: C.surface, flexShrink: 0, borderRadius: "0 0 0 0" }}>
-        {(["console", "output"] as CTab[]).map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{ padding: "5px 12px", borderRadius: 7, border: "none", cursor: "pointer", fontFamily: INTER, fontSize: 11, fontWeight: tab === t ? 600 : 400, color: tab === t ? C.tp : C.tm, background: tab === t ? "rgba(255,255,255,0.08)" : "transparent", borderBottom: tab === t ? `2px solid ${C.blue}` : "2px solid transparent", transition: "all 0.15s" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 3,
+          padding: "6px 10px",
+          borderBottom: `1px solid ${C.border}`,
+          background: C.surface,
+          flexShrink: 0,
+          borderRadius: "0 0 0 0",
+        }}
+      >
+        {(["console", "output"] as CTab[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            style={{
+              padding: "5px 12px",
+              borderRadius: 7,
+              border: "none",
+              cursor: "pointer",
+              fontFamily: INTER,
+              fontSize: 11,
+              fontWeight: tab === t ? 600 : 400,
+              color: tab === t ? C.tp : C.tm,
+              background: tab === t ? "rgba(255,255,255,0.08)" : "transparent",
+              borderBottom: tab === t ? `2px solid ${C.blue}` : "2px solid transparent",
+              transition: "all 0.15s",
+            }}
+          >
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
         ))}
         <div style={{ flex: 1 }} />
-        <span style={{ background: `${C.emerald}18`, color: C.emerald, border: `1px solid ${C.emerald}30`, borderRadius: 20, padding: "2px 9px", fontSize: 10, fontWeight: 600 }}>3/3 Passed</span>
+        {isExecuting ? (
+          <span
+            style={{
+              background: `${C.blue}18`,
+              color: C.blue,
+              border: `1px solid ${C.blue}30`,
+              borderRadius: 20,
+              padding: "2px 9px",
+              fontSize: 10,
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            Running...
+          </span>
+        ) : isSuccess ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span
+              style={{
+                background: `${C.emerald}18`,
+                color: C.emerald,
+                border: `1px solid ${C.emerald}30`,
+                borderRadius: 20,
+                padding: "2px 9px",
+                fontSize: 10,
+                fontWeight: 600,
+              }}
+            >
+              Passed
+            </span>
+            {formatTime(executionResult?.executionTime) && (
+              <span style={{ fontFamily: MONO, fontSize: 10, color: C.tm }}>
+                {formatTime(executionResult?.executionTime)}
+              </span>
+            )}
+          </div>
+        ) : isFailed ? (
+          <span
+            style={{
+              background: `${C.rose}18`,
+              color: C.rose,
+              border: `1px solid ${C.rose}30`,
+              borderRadius: 20,
+              padding: "2px 9px",
+              fontSize: 10,
+              fontWeight: 600,
+            }}
+          >
+            {failureLabel}
+          </span>
+        ) : (
+          <span
+            style={{
+              background: "rgba(255,255,255,0.05)",
+              color: C.tm,
+              border: `1px solid ${C.border}`,
+              borderRadius: 20,
+              padding: "2px 9px",
+              fontSize: 10,
+              fontWeight: 500,
+            }}
+          >
+            Ready
+          </span>
+        )}
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "10px 12px" }}>
-        {tab === "console" ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {logs.map((l, i) => (
-              <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                <ChevronRight size={10} color={C.tm} style={{ flexShrink: 0, marginTop: 4 }} />
-                <span style={{ fontFamily: MONO, fontSize: 11, color: lc(l.t), lineHeight: 1.7 }}>{l.text}</span>
+        {isExecuting ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontFamily: MONO,
+              fontSize: 11,
+              color: C.blue,
+              padding: "6px 0",
+            }}
+          >
+            <ChevronRight size={12} color={C.blue} />
+            <span>Executing program on compiler server...</span>
+          </div>
+        ) : !executionResult ? (
+          <div
+            style={{
+              fontFamily: INTER,
+              fontSize: 12,
+              color: C.tm,
+              padding: "12px 0",
+              textAlign: "center",
+            }}
+          >
+            Press <strong style={{ color: C.ts }}>Run</strong> in the editor toolbar to execute your code.
+          </div>
+        ) : tab === "console" ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {/* Status overview */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <ChevronRight
+                size={10}
+                color={isSuccess ? C.emerald : C.rose}
+                style={{ flexShrink: 0 }}
+              />
+              <span
+                style={{
+                  fontFamily: MONO,
+                  fontSize: 11,
+                  color: isSuccess ? C.emerald : C.rose,
+                  fontWeight: 600,
+                }}
+              >
+                {isSuccess
+                  ? `Execution Succeeded (Exit code: ${executionResult.exitCode ?? 0})`
+                  : `Execution Failed: ${failureLabel}`}
+              </span>
+            </div>
+
+            {/* Execution metrics */}
+            {(formatTime(executionResult.executionTime) || formatMemory(executionResult.memory)) && (
+              <div
+                style={{
+                  fontFamily: MONO,
+                  fontSize: 10,
+                  color: C.tm,
+                  marginLeft: 18,
+                  marginBottom: 4,
+                }}
+              >
+                {formatTime(executionResult.executionTime) &&
+                  `Time: ${formatTime(executionResult.executionTime)}`}
+                {formatTime(executionResult.executionTime) &&
+                  formatMemory(executionResult.memory) &&
+                  " · "}
+                {formatMemory(executionResult.memory) &&
+                  `Memory: ${formatMemory(executionResult.memory)}`}
               </div>
-            ))}
+            )}
+
+            {/* Error output if any */}
+            {executionResult.error && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 4 }}>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.5px",
+                    color: C.rose,
+                    fontFamily: INTER,
+                  }}
+                >
+                  Error Details:
+                </span>
+                <pre
+                  style={{
+                    fontFamily: MONO,
+                    fontSize: 11,
+                    color: C.rose,
+                    background: "rgba(244,63,94,0.08)",
+                    border: "1px solid rgba(244,63,94,0.2)",
+                    borderRadius: 6,
+                    padding: "8px 10px",
+                    margin: 0,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {executionResult.error}
+                </pre>
+              </div>
+            )}
+
+            {/* Standard output if any */}
+            {executionResult.output && executionResult.output.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 4 }}>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.5px",
+                    color: C.tm,
+                    fontFamily: INTER,
+                  }}
+                >
+                  Standard Output:
+                </span>
+                <pre
+                  style={{
+                    fontFamily: MONO,
+                    fontSize: 11,
+                    color: C.tp,
+                    background: "rgba(0,0,0,0.3)",
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 6,
+                    padding: "8px 10px",
+                    margin: 0,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {executionResult.output}
+                </pre>
+              </div>
+            ) : !executionResult.error ? (
+              <div
+                style={{
+                  fontFamily: MONO,
+                  fontSize: 11,
+                  color: C.tm,
+                  fontStyle: "italic",
+                  marginLeft: 18,
+                  marginTop: 6,
+                }}
+              >
+                No Output
+              </div>
+            ) : null}
           </div>
         ) : (
-          <div style={{ fontFamily: MONO, fontSize: 12, color: C.ts, lineHeight: 1.9 }}>
-            <div style={{ color: C.emerald }}>$ node solution.js</div>
-            <div>[0, 1]</div><div>[1, 2]</div><div>[0, 1]</div>
-            <div style={{ color: C.tm, marginTop: 8 }}>Execution time: 76ms · Memory: 44.2 MB</div>
+          /* Output tab: Clean, full-height raw stdout / stderr view */
+          <div style={{ fontFamily: MONO, fontSize: 12, lineHeight: 1.7, minHeight: "100%" }}>
+            {executionResult.output && executionResult.output.length > 0 ? (
+              <pre
+                style={{
+                  fontFamily: MONO,
+                  fontSize: 12,
+                  color: C.tp,
+                  margin: 0,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}
+              >
+                {executionResult.output}
+              </pre>
+            ) : executionResult.error ? (
+              <pre
+                style={{
+                  fontFamily: MONO,
+                  fontSize: 12,
+                  color: C.rose,
+                  margin: 0,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}
+              >
+                {executionResult.error}
+              </pre>
+            ) : (
+              <div style={{ color: C.tm, fontStyle: "italic", fontSize: 11 }}>
+                No Output
+              </div>
+            )}
+            {(formatTime(executionResult.executionTime) || formatMemory(executionResult.memory)) && (
+              <div
+                style={{
+                  color: C.tm,
+                  marginTop: 14,
+                  paddingTop: 8,
+                  borderTop: `1px solid ${C.border}`,
+                  fontSize: 11,
+                }}
+              >
+                {formatTime(executionResult.executionTime)
+                  ? `Execution time: ${formatTime(executionResult.executionTime)}`
+                  : ""}
+                {formatTime(executionResult.executionTime) &&
+                formatMemory(executionResult.memory)
+                  ? " · "
+                  : ""}
+                {formatMemory(executionResult.memory)
+                  ? `Memory: ${formatMemory(executionResult.memory)}`
+                  : ""}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1046,6 +1810,47 @@ export default function InterviewRoom() {
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const stompClientRef = useRef<Client | null>(null);
+  const remoteCodeHandlerRef = useRef<((msg: CodeSyncMessage) => void) | null>(null);
+
+  const handleRegisterRemoteCode = useCallback(
+    (handler: ((msg: CodeSyncMessage) => void) | null) => {
+      remoteCodeHandlerRef.current = handler;
+    },
+    []
+  );
+
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [executionResult, setExecutionResult] = useState<RunInterviewCodeResponse | null>(null);
+
+  const handleRunCode = useCallback(
+    async (lang: SupportedInterviewLanguage, code: string) => {
+      if (!roomId || isExecuting) return;
+      setIsExecuting(true);
+      setConsoleVisible(true);
+      try {
+        const res = await runInterviewCode(roomId, {
+          language: lang,
+          code,
+          input: "",
+        });
+        setExecutionResult(res);
+      } catch (err: any) {
+        setExecutionResult({
+          status: "EXECUTION_ERROR",
+          output: "",
+          error:
+            err?.response?.data?.message ||
+            err?.message ||
+            "Execution request failed",
+          exitCode: -1,
+        });
+      } finally {
+        setIsExecuting(false);
+      }
+    },
+    [roomId, isExecuting]
+  );
+
   const hasCandidateJoinedRef = useRef(false);
   const isOfferingRef = useRef(false);
   const remoteIceQueueRef = useRef<RTCIceCandidateInit[]>([]);
@@ -1449,9 +2254,33 @@ export default function InterviewRoom() {
           },
         );
 
+        const codeSub = client.subscribe(
+          `/topic/interview/${roomId}/code`,
+          (message) => {
+            try {
+              const codeMsg = JSON.parse(message.body) as CodeSyncMessage;
+              if (!codeMsg || codeMsg.roomId !== roomId) return;
+
+              const currentUserId = user?.id || user?._id;
+              const isFromSelf =
+                (codeMsg.senderUserId && codeMsg.senderUserId === currentUserId) ||
+                (codeMsg.senderRole && codeMsg.senderRole.toLowerCase() === userRole.toLowerCase());
+
+              if (isFromSelf) {
+                return;
+              }
+
+              remoteCodeHandlerRef.current?.(codeMsg);
+            } catch (err) {
+              console.error("Unable to parse code sync message", err);
+            }
+          },
+        );
+
         unsubscribe = () => {
           presenceSub.unsubscribe();
           signalSub.unsubscribe();
+          codeSub.unsubscribe();
         };
 
         // Flush any queued local ICE candidates that were collected prior to connect
@@ -1501,6 +2330,7 @@ export default function InterviewRoom() {
       isActive = false;
       unsubscribe?.();
       stompClientRef.current = null;
+      remoteCodeHandlerRef.current = null;
       hasCandidateJoinedRef.current = false;
       remoteIceQueueRef.current = [];
       localIceQueueRef.current = [];
@@ -1627,6 +2457,7 @@ export default function InterviewRoom() {
       <style>{`
         @keyframes waveBar { from{transform:scaleY(0.4)} to{transform:scaleY(1)} }
         @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:0.35} }
+        @keyframes spin    { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
         *{box-sizing:border-box;margin:0;padding:0}
         ::-webkit-scrollbar{width:4px;height:4px}
         ::-webkit-scrollbar-track{background:transparent}
@@ -1692,18 +2523,32 @@ export default function InterviewRoom() {
                   </button>
                 )}
               </div>
-              <div style={{ flex: 1, overflow: "hidden" }}>
-                {whiteboardActive
-                  ? <Whiteboard onClose={() => setWhiteboardActive(false)} />
-                  : rightTab === "code" ? <CodeEditor /> : <ChatPanel />
-                }
+              <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
+                <div style={{ display: !whiteboardActive && rightTab === "code" ? "block" : "none", height: "100%", width: "100%" }}>
+                  <CodeEditor
+                    roomId={roomId}
+                    stompClientRef={stompClientRef}
+                    onRegisterRemoteCodeHandler={handleRegisterRemoteCode}
+                    currentUserId={user?.id || user?._id}
+                    userRole={userRole}
+                    isExecuting={isExecuting}
+                    onRunCode={handleRunCode}
+                  />
+                </div>
+                <div style={{ display: !whiteboardActive && rightTab === "chat" ? "block" : "none", height: "100%", width: "100%" }}>
+                  <ChatPanel />
+                </div>
+                {whiteboardActive && <Whiteboard onClose={() => setWhiteboardActive(false)} />}
               </div>
             </GlassCard>
 
             {/* Console — hidden when whiteboard active */}
             {consoleVisible && !whiteboardActive && (
               <GlassCard style={{ flex: "0 0 calc(46% - 10px)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-                <ConsolePanel />
+                <ConsolePanel
+                  executionResult={executionResult}
+                  isExecuting={isExecuting}
+                />
               </GlassCard>
             )}
           </div>

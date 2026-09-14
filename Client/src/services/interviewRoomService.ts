@@ -25,3 +25,47 @@ export const joinInterviewRoom = async (roomId: string): Promise<InterviewRoomRe
   const { data } = await API.post(`/interviews/${roomId}/join`);
   return data;
 };
+
+export interface CodeSnapshotResponse {
+  roomId: string;
+  currentCode: string;
+  language: string;
+}
+
+export const getInterviewCodeSnapshot = async (roomId: string): Promise<CodeSnapshotResponse> => {
+  const { data } = await API.get(`/interviews/${roomId}/code`);
+  return data;
+};
+
+export interface CodeSyncMessage {
+  roomId: string;
+  senderUserId?: string;
+  senderRole?: string;
+  code?: string | null;
+  language?: string;
+  cursorPosition?: number | null;
+}
+
+export interface RunInterviewCodeRequest {
+  language: string;
+  code: string;
+  input?: string;
+}
+
+export interface RunInterviewCodeResponse {
+  status: string;
+  output?: string;
+  error?: string;
+  exitCode?: number;
+  executionTime?: string;
+  memory?: string;
+}
+
+export const runInterviewCode = async (
+  roomId: string,
+  payload: RunInterviewCodeRequest
+): Promise<RunInterviewCodeResponse> => {
+  const { data } = await API.post(`/interviews/${roomId}/run`, payload);
+  return data;
+};
+
