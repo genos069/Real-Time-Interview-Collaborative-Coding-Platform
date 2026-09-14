@@ -18,12 +18,33 @@ export const getUser = (): User | null => {
   try {
     const raw = localStorage.getItem(USER_KEY);
 
-    if (!raw || raw === "undefined") return null;
-
-    return JSON.parse(raw) as User;
+    if (raw && raw !== "undefined") {
+      return JSON.parse(raw) as User;
+    }
   } catch {
-    return null;
+    // fallback to token
   }
+
+  const token = getToken();
+  if (token) {
+    try {
+      const parts = token.split(".");
+      if (parts.length >= 2) {
+        const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+        const rawRole = String(payload?.role || "").toLowerCase().replace(/^role_/, "");
+        const role = (rawRole === "candidate" || rawRole === "interviewer") ? rawRole : undefined;
+        return {
+          email: payload?.sub,
+          role,
+          name: payload?.name,
+        };
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return null;
 };
 
 export const clearUser = () => {
@@ -61,6 +82,34 @@ export const getAuth = () => {
 
 export const isLoggedIn = (): boolean => {
   return !!getToken();
+};
+
+/* ---------------- ROLE ---------------- */
+
+export const getUserRole = (): "candidate" | "interviewer" => {
+  const user = getUser();
+  const rawRole = user?.role?.toLowerCase().replace(/^role_/, "");
+  if (rawRole === "candidate" || rawRole === "interviewer") {
+    return rawRole;
+  }
+
+  const token = getToken();
+  if (token) {
+    try {
+      const parts = token.split(".");
+      if (parts.length >= 2) {
+        const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+        const role = String(payload?.role || "").toLowerCase().replace(/^role_/, "");
+        if (role === "candidate" || role === "interviewer") {
+          return role;
+        }
+      }
+    } catch {
+      // fallback
+    }
+  }
+
+  return "interviewer";
 };
 
 // const USER_KEY = "user";

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { Client } from "@stomp/stompjs";
-import { getToken } from "../bot/utils/auth";
+import { getToken, getUser, getUserRole } from "../bot/utils/auth";
 import {
   Mic, MicOff, Video, VideoOff, Monitor, MonitorOff, Hand, Maximize2, Minimize2,
   Users, PhoneOff, MessageSquare, Code2, Send, ChevronDown, Play, RotateCcw,
@@ -69,6 +69,17 @@ type PresenceMessage = {
   event: string;
 };
 
+type WebRTCSignalMessage = {
+  roomId: string;
+  senderUserId?: string;
+  senderRole?: string;
+  type: "OFFER" | "ANSWER" | "ICE_CANDIDATE";
+  sdp?: string;
+  candidate?: string;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
+};
+
 function getWebSocketUrl() {
   const apiUrl = new URL(import.meta.env.VITE_API_URL ?? window.location.origin);
   apiUrl.protocol = apiUrl.protocol === "https:" ? "wss:" : "ws:";
@@ -114,7 +125,35 @@ function GlassCard({ children, className, style }: { children: React.ReactNode; 
 }
 
 /* ─── Navbar ─── */
-function Navbar({ timer, onLeave }: { timer: string; onLeave: () => void }) {
+function Navbar({
+  timer,
+  onLeave,
+  presenceStatus = "Connecting",
+  presenceMessages = [],
+}: {
+  timer: string;
+  onLeave: () => void;
+  presenceStatus?: string;
+  presenceMessages?: PresenceMessage[];
+}) {
+  const [showPresence, setShowPresence] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showPresence) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowPresence(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showPresence]);
+
+  const isConnected = presenceStatus === "Connected";
+  const statusColor = isConnected ? C.emerald : presenceStatus === "Connecting" ? C.amber : C.rose;
+  const statusLabel = isConnected ? "STOMP Connected" : (presenceStatus ? `STOMP: ${presenceStatus}` : "STOMP Disconnected");
+
   return (
     <nav style={{
       position: "fixed", top: 0, left: 0, right: 0, zIndex: 60, height: 52,
@@ -157,7 +196,70 @@ function Navbar({ timer, onLeave }: { timer: string; onLeave: () => void }) {
           </div>
           <span style={{ color: C.ts, fontSize: 11, fontWeight: 500 }}>2 participants</span>
         </div>
-        <span style={{ background: `${C.emerald}18`, color: C.emerald, border: `1px solid ${C.emerald}30`, borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 600 }}>Connected</span>
+        <div ref={dropdownRef} style={{ position: "relative" }}>
+          <button
+            onClick={() => setShowPresence(v => !v)}
+            title="STOMP presence status (click to toggle recent events)"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              background: `${statusColor}18`,
+              color: statusColor,
+              border: `1px solid ${statusColor}35`,
+              borderRadius: 20,
+              padding: "3px 10px",
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: INTER,
+              transition: "all 0.15s",
+            }}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: statusColor }} />
+            <span>{statusLabel}</span>
+            {presenceMessages.length > 0 && (
+              <span style={{ fontSize: 9, background: `${statusColor}25`, borderRadius: 10, padding: "1px 5px", fontFamily: MONO }}>
+                {presenceMessages.length}
+              </span>
+            )}
+            <ChevronDown size={10} style={{ transform: showPresence ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+          </button>
+
+          {showPresence && (
+            <div style={{
+              position: "absolute",
+              top: 32,
+              right: 0,
+              zIndex: 70,
+              minWidth: 220,
+              maxWidth: 320,
+              background: "rgba(15,23,42,0.96)",
+              backdropFilter: "blur(20px)",
+              border: `1px solid ${C.border}`,
+              borderRadius: 10,
+              padding: "8px 12px",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+              fontFamily: MONO,
+              fontSize: 10,
+              color: C.ts,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, color: C.tp, fontWeight: 600 }}>
+                <span>STOMP presence</span>
+                <span style={{ color: statusColor }}>{presenceStatus}</span>
+              </div>
+              {presenceMessages.length === 0 ? (
+                <div style={{ color: C.tm }}>No recent events</div>
+              ) : (
+                presenceMessages.slice(-5).map((presence, idx) => (
+                  <div key={`${presence.userId}-${presence.event}-${idx}`} style={{ color: C.emerald, marginTop: 3 }}>
+                    {presence.role} {presence.event.toLowerCase()} ({presence.userId})
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Leave */}
@@ -174,13 +276,15 @@ function Navbar({ timer, onLeave }: { timer: string; onLeave: () => void }) {
 }
 
 /* ─── Participants Sidebar ─── */
-const PARTICIPANTS = [
-  { id: 1, name: "Priya Nair", role: "Candidate", ini: "PN", color: "#7C3AED", mic: true, cam: true, ping: 22, speaking: true },
-  { id: 2, name: "Sarah Lin", role: "Interviewer", ini: "SL", color: "#1D4ED8", mic: true, cam: true, ping: 18, speaking: false },
-  { id: 3, name: "James Okafor", role: "Observer", ini: "JO", color: "#059669", mic: false, cam: false, ping: 105, speaking: false },
-];
+function ParticipantsSidebar({ onClose, isCandidate, userName }: { onClose: () => void; isCandidate?: boolean; userName?: string }) {
+  const candidateDisplayName = isCandidate && userName ? `${userName} (You)` : (isCandidate ? "Priya Nair (You)" : "Priya Nair");
+  const interviewerDisplayName = !isCandidate && userName ? `${userName} (You)` : (!isCandidate ? "Sarah Lin (You)" : "Sarah Lin");
+  const participants = [
+    { id: 1, name: candidateDisplayName, role: "Candidate", ini: "PN", color: "#7C3AED", mic: true, cam: true, ping: 22, speaking: true },
+    { id: 2, name: interviewerDisplayName, role: "Interviewer", ini: "SL", color: "#1D4ED8", mic: true, cam: true, ping: 18, speaking: false },
+    { id: 3, name: "James Okafor", role: "Observer", ini: "JO", color: "#059669", mic: false, cam: false, ping: 105, speaking: false },
+  ];
 
-function ParticipantsSidebar({ onClose }: { onClose: () => void }) {
   return (
     <div style={{
       position: "absolute", top: 0, right: 0, bottom: 0, zIndex: 30,
@@ -197,7 +301,7 @@ function ParticipantsSidebar({ onClose }: { onClose: () => void }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Users size={15} color={C.blue} />
           <span style={{ color: C.tp, fontWeight: 700, fontSize: 14 }}>Participants</span>
-          <span style={{ background: `${C.blue}20`, color: C.blue, borderRadius: 20, padding: "1px 8px", fontSize: 11, fontWeight: 700 }}>{PARTICIPANTS.length}</span>
+          <span style={{ background: `${C.blue}20`, color: C.blue, borderRadius: 20, padding: "1px 8px", fontSize: 11, fontWeight: 700 }}>{participants.length}</span>
         </div>
         <button onClick={onClose} style={{ width: 26, height: 26, borderRadius: 7, border: "none", cursor: "pointer", background: "rgba(255,255,255,0.07)", display: "flex", alignItems: "center", justifyContent: "center", color: C.ts }}>
           <X size={13} />
@@ -206,7 +310,7 @@ function ParticipantsSidebar({ onClose }: { onClose: () => void }) {
 
       {/* List */}
       <div style={{ flex: 1, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
-        {PARTICIPANTS.map(p => (
+        {participants.map(p => (
           <div key={p.id} style={{
             display: "flex", alignItems: "center", gap: 10,
             padding: "10px 12px", borderRadius: 12,
@@ -444,14 +548,23 @@ function Whiteboard({ onClose }: { onClose: () => void }) {
 function VideoPanel({
   mic, cam, screen, handRaised, blurred, showParticipants,
   onMic, onCam, onScreen, onHand, onBlur, onFullscreen, onParticipants, onWhiteboard, whiteboardActive,
-  screenStream,
+  screenStream, localStream, remoteStream, mediaError,
+  isCandidate = false, userName, onLeave,
 }: {
   mic: boolean; cam: boolean; screen: boolean; handRaised: boolean; blurred: boolean; showParticipants: boolean; whiteboardActive: boolean;
   onMic: () => void; onCam: () => void; onScreen: () => void; onHand: () => void; onBlur: () => void;
   onFullscreen: () => void; onParticipants: () => void; onWhiteboard: () => void;
   screenStream: MediaStream | null;
+  localStream?: MediaStream | null;
+  remoteStream?: MediaStream | null;
+  mediaError?: string | null;
+  isCandidate?: boolean;
+  userName?: string;
+  onLeave?: () => void;
 }) {
   const screenVideoRef = useRef<HTMLVideoElement>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const [speaking, setSpeaking] = useState(0);
 
   useEffect(() => {
@@ -464,6 +577,21 @@ function VideoPanel({
       screenVideoRef.current.srcObject = screenStream;
     }
   }, [screenStream]);
+
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream, cam, screen]);
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+      remoteVideoRef.current.play().catch(err => {
+        console.warn("Remote video play() warning:", err);
+      });
+    }
+  }, [remoteStream, screen]);
 
   function CtrlBtn({ icon, label, active, danger, onClick }: { icon: React.ReactNode; label: string; active?: boolean; danger?: boolean; onClick: () => void }) {
     const [hov, setHov] = useState(false);
@@ -507,6 +635,11 @@ function VideoPanel({
     <div style={{ position: "relative", height: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
       {/* Main video area */}
       <div style={{ flex: 1, borderRadius: 18, overflow: "hidden", position: "relative", background: "#070d18" }}>
+        {mediaError && (
+          <div style={{ position: "absolute", top: 12, left: 12, right: 12, zIndex: 20, background: "rgba(244,63,94,0.9)", color: "#fff", padding: "8px 12px", borderRadius: 8, fontSize: 12, fontFamily: INTER }}>
+            {mediaError}
+          </div>
+        )}
         {screen && screenStream ? (
           /* Real screen share */
           <>
@@ -524,8 +657,8 @@ function VideoPanel({
             {/* Floating pip thumbnails */}
             <div style={{ position: "absolute", bottom: 14, right: 14, display: "flex", flexDirection: "column", gap: 8, zIndex: 10 }}>
               {[
-                { name: "Priya Nair", ini: "PN", color: "#7C3AED", active: speaking === 0 },
-                { name: "You", ini: "SL", color: "#1D4ED8", active: speaking === 1 },
+                { name: isCandidate ? "You" : "Priya Nair", ini: "PN", color: "#7C3AED", active: speaking === 0 },
+                { name: !isCandidate ? "You" : "Sarah Lin", ini: "SL", color: "#1D4ED8", active: speaking === 1 },
               ].map(p => (
                 <div key={p.name} style={{
                   width: 112, height: 74, borderRadius: 11, background: C.elevated,
@@ -547,8 +680,8 @@ function VideoPanel({
           /* Normal video grid */
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", height: "100%", gap: 8, padding: 8 }}>
             {[
-              { name: "Priya Nair", ini: "PN", color: "#7C3AED", sub: "Candidate", active: speaking === 0 },
-              { name: "Sarah Lin (You)", ini: "SL", color: "#1D4ED8", sub: "Interviewer", active: speaking === 1 },
+              { name: isCandidate && userName ? `${userName} (You)` : (isCandidate ? "Priya Nair (You)" : "Priya Nair"), ini: "PN", color: "#7C3AED", sub: "Candidate", isSelf: !!isCandidate, active: speaking === 0 },
+              { name: !isCandidate && userName ? `${userName} (You)` : (!isCandidate ? "Sarah Lin (You)" : "Sarah Lin"), ini: "SL", color: "#1D4ED8", sub: "Interviewer", isSelf: !isCandidate, active: speaking === 1 },
             ].map(p => (
               <div key={p.name} style={{
                 borderRadius: 14, background: C.elevated,
@@ -558,17 +691,51 @@ function VideoPanel({
                 boxShadow: p.active ? `0 0 20px ${C.emerald}30` : "none",
                 transition: "border-color 0.3s,box-shadow 0.3s",
               }}>
-                <div style={{
-                  width: 64, height: 64, borderRadius: "50%",
-                  background: `linear-gradient(135deg,${p.color},${p.color}88)`,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  color: "#fff", fontSize: 20, fontWeight: 700, fontFamily: INTER,
-                  boxShadow: `0 8px 28px ${p.color}50`,
-                  filter: blurred && p.name === "Sarah Lin (You)" ? "blur(4px)" : "none",
-                  transition: "filter 0.3s",
-                }}>{p.ini}</div>
+                {p.isSelf && cam && localStream && localStream.getVideoTracks().length > 0 ? (
+                  <video
+                    ref={localVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    style={{
+                      width: "100%", height: "100%", objectFit: "cover", transform: "scaleX(-1)",
+                      filter: blurred ? "blur(4px)" : "none", transition: "filter 0.3s",
+                    }}
+                  />
+                ) : !p.isSelf && remoteStream ? (
+                  <>
+                    <video
+                      ref={remoteVideoRef}
+                      autoPlay
+                      playsInline
+                      style={{
+                        width: "100%", height: "100%", objectFit: "cover",
+                        display: remoteStream.getVideoTracks().length > 0 ? "block" : "none",
+                      }}
+                    />
+                    {remoteStream.getVideoTracks().length === 0 && (
+                      <div style={{
+                        width: 64, height: 64, borderRadius: "50%",
+                        background: `linear-gradient(135deg,${p.color},${p.color}88)`,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        color: "#fff", fontSize: 20, fontWeight: 700, fontFamily: INTER,
+                        boxShadow: `0 8px 28px ${p.color}50`,
+                      }}>{p.ini}</div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{
+                    width: 64, height: 64, borderRadius: "50%",
+                    background: `linear-gradient(135deg,${p.color},${p.color}88)`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    color: "#fff", fontSize: 20, fontWeight: 700, fontFamily: INTER,
+                    boxShadow: `0 8px 28px ${p.color}50`,
+                    filter: blurred && p.isSelf ? "blur(4px)" : "none",
+                    transition: "filter 0.3s",
+                  }}>{p.ini}</div>
+                )}
 
-                {blurred && p.name === "Sarah Lin (You)" && (
+                {blurred && p.isSelf && (
                   <div style={{ position: "absolute", top: 8, right: 8 }}>
                     <span style={{ background: `${C.blue}22`, border: `1px solid ${C.blue}40`, borderRadius: 8, padding: "2px 7px", fontSize: 9, color: C.blue, fontWeight: 600, fontFamily: INTER }}>Blur ON</span>
                   </div>
@@ -601,7 +768,7 @@ function VideoPanel({
         <CtrlBtn icon={<Maximize2 size={16} />} label="Fullscreen" onClick={onFullscreen} />
         <div style={{ width: 1, height: 38, background: C.border, margin: "0 4px" }} />
         <button
-          onClick={() => { window.location.href = "/interviewer"; }}
+          onClick={onLeave}
           style={{
             display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
             padding: "7px 12px", borderRadius: 12, cursor: "pointer", border: "none", minWidth: 56,
@@ -848,10 +1015,16 @@ function ShortcutModal({ onClose }: { onClose: () => void }) {
 /* ─── Root ─── */
 export default function InterviewRoom() {
   const { roomId } = useParams<{ roomId: string }>();
+  const navigate = useNavigate();
   const timer = useTimer();
   const containerRef = useRef<HTMLDivElement>(null);
   const [presenceStatus, setPresenceStatus] = useState("Connecting");
   const [presenceMessages, setPresenceMessages] = useState<PresenceMessage[]>([]);
+
+  const userRole = getUserRole();
+  const isCandidate = userRole === "candidate";
+  const user = getUser();
+  const userName = user?.name?.trim();
 
   const [mic, setMic] = useState(true);
   const [cam, setCam] = useState(true);
@@ -865,6 +1038,257 @@ export default function InterviewRoom() {
   const [consoleVisible, setConsoleVisible] = useState(true);
   const [shortcutOpen, setShortcutOpen] = useState(false);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const stompClientRef = useRef<Client | null>(null);
+  const hasCandidateJoinedRef = useRef(false);
+  const isOfferingRef = useRef(false);
+  const remoteIceQueueRef = useRef<RTCIceCandidateInit[]>([]);
+  const localIceQueueRef = useRef<RTCIceCandidate[]>([]);
+  const mediaAcquisitionPromiseRef = useRef<Promise<MediaStream | null> | null>(null);
+
+  const processOrQueueRemoteCandidate = async (candidateInit: RTCIceCandidateInit) => {
+    const pc = peerConnectionRef.current;
+    if (!pc) return;
+    if (pc.remoteDescription && pc.remoteDescription.type) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidateInit));
+      } catch (err) {
+        console.error("Error adding remote ICE candidate:", err);
+      }
+    } else {
+      console.info("Queueing remote ICE candidate until remoteDescription is set");
+      remoteIceQueueRef.current.push(candidateInit);
+    }
+  };
+
+  const flushQueuedRemoteCandidates = async () => {
+    const pc = peerConnectionRef.current;
+    if (!pc || !pc.remoteDescription) return;
+    while (remoteIceQueueRef.current.length > 0) {
+      const candidateInit = remoteIceQueueRef.current.shift();
+      if (candidateInit) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidateInit));
+        } catch (err) {
+          console.error("Error flushing queued remote ICE candidate:", err);
+        }
+      }
+    }
+  };
+
+  const createAndSendOffer = async () => {
+    const pc = peerConnectionRef.current;
+    const client = stompClientRef.current;
+    if (!pc || !client || !client.connected || !roomId) {
+      return;
+    }
+
+    if (isCandidate) {
+      return;
+    }
+
+    if (!localStreamRef.current) {
+      return;
+    }
+
+    if (isOfferingRef.current || pc.signalingState !== "stable") {
+      return;
+    }
+
+    isOfferingRef.current = true;
+    try {
+      console.info("Interviewer creating and sending WebRTC OFFER...");
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      client.publish({
+        destination: `/app/interview/${roomId}/signal`,
+        body: JSON.stringify({
+          roomId,
+          type: "OFFER",
+          sdp: offer.sdp,
+        }),
+      });
+      console.info("Sent WebRTC OFFER to room:", roomId);
+    } catch (err) {
+      console.error("Failed to create/send WebRTC offer:", err);
+    } finally {
+      isOfferingRef.current = false;
+    }
+  };
+
+  const handleLeave = () => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(t => t.stop());
+      screenStreamRef.current = null;
+    }
+    screenStream?.getTracks().forEach(t => t.stop());
+    localStreamRef.current?.getTracks().forEach(t => t.stop());
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.onicecandidate = null;
+      peerConnectionRef.current.ontrack = null;
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    remoteStreamRef.current = null;
+    setRemoteStream(null);
+    remoteIceQueueRef.current = [];
+    localIceQueueRef.current = [];
+    mediaAcquisitionPromiseRef.current = null;
+    hasCandidateJoinedRef.current = false;
+    stompClientRef.current = null;
+    navigate(isCandidate ? "/candidate" : "/interviewer");
+  };
+
+  useEffect(() => {
+    let active = true;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMediaError("getUserMedia is not supported");
+      return;
+    }
+
+    const acquireMedia = async (): Promise<MediaStream | null> => {
+      try {
+        return await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      } catch (err) {
+        console.warn("getUserMedia({ video: true, audio: true }) failed, falling back to audio only:", err);
+        try {
+          const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          if (active) {
+            setCam(false);
+            setMediaError("Camera unavailable. Microphone audio enabled.");
+          }
+          return audioStream;
+        } catch (audioErr) {
+          console.error("getUserMedia audio fallback also failed:", audioErr);
+          throw audioErr;
+        }
+      }
+    };
+
+    const promise = acquireMedia()
+      .then(stream => {
+        if (!active || !stream) {
+          stream?.getTracks().forEach(t => t.stop());
+          return null;
+        }
+        localStreamRef.current = stream;
+        setLocalStream(stream);
+        stream.getAudioTracks().forEach(t => { t.enabled = mic; });
+        stream.getVideoTracks().forEach(t => { t.enabled = cam; });
+        return stream;
+      })
+      .catch(err => {
+        if (!active) return null;
+        setMediaError(err instanceof Error ? err.message : "Failed to access microphone/camera");
+        return null;
+      });
+
+    mediaAcquisitionPromiseRef.current = promise;
+
+    return () => {
+      active = false;
+      screenStreamRef.current?.getTracks().forEach(t => t.stop());
+      screenStreamRef.current = null;
+      localStreamRef.current?.getTracks().forEach(t => t.stop());
+      localStreamRef.current = null;
+      mediaAcquisitionPromiseRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+    });
+    peerConnectionRef.current = pc;
+
+    pc.onicecandidate = (event) => {
+      if (!event.candidate) return;
+      const client = stompClientRef.current;
+      if (client?.connected && roomId) {
+        client.publish({
+          destination: `/app/interview/${roomId}/signal`,
+          body: JSON.stringify({
+            roomId,
+            type: "ICE_CANDIDATE",
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+          }),
+        });
+      } else {
+        localIceQueueRef.current.push(event.candidate);
+      }
+    };
+
+    pc.ontrack = (event) => {
+      console.info("WebRTC ontrack received track:", event.track.kind, event.track.id);
+      const incomingStream = event.streams?.[0];
+      if (incomingStream) {
+        remoteStreamRef.current = incomingStream;
+        setRemoteStream(incomingStream);
+      } else {
+        let stream = remoteStreamRef.current;
+        if (!stream) {
+          stream = new MediaStream();
+          remoteStreamRef.current = stream;
+        }
+        if (!stream.getTracks().some(t => t.id === event.track.id)) {
+          stream.addTrack(event.track);
+        }
+        setRemoteStream(stream);
+      }
+    };
+
+    return () => {
+      pc.onicecandidate = null;
+      pc.ontrack = null;
+      pc.close();
+      peerConnectionRef.current = null;
+      remoteStreamRef.current = null;
+      setRemoteStream(null);
+      remoteIceQueueRef.current = [];
+      localIceQueueRef.current = [];
+    };
+  }, [roomId]);
+
+  useEffect(() => {
+    if (!localStream || !peerConnectionRef.current) return;
+    const pc = peerConnectionRef.current;
+    const senders = pc.getSenders();
+    localStream.getTracks().forEach((track) => {
+      const alreadyAdded = senders.some((sender) => sender.track === track);
+      if (!alreadyAdded) {
+        pc.addTrack(track, localStream);
+      }
+    });
+
+    if (!isCandidate && hasCandidateJoinedRef.current) {
+      void createAndSendOffer();
+    }
+  }, [localStream, isCandidate]);
+
+  const toggleMic = () => {
+    setMic(m => {
+      const next = !m;
+      localStreamRef.current?.getAudioTracks().forEach(t => { t.enabled = next; });
+      return next;
+    });
+  };
+
+  const toggleCam = () => {
+    setCam(c => {
+      const next = !c;
+      localStreamRef.current?.getVideoTracks().forEach(t => { t.enabled = next; });
+      return next;
+    });
+  };
 
   useEffect(() => {
     let isActive = true;
@@ -891,7 +1315,9 @@ export default function InterviewRoom() {
         if (isActive) {
           setPresenceStatus("Connected");
         }
-        const subscription = client.subscribe(
+        stompClientRef.current = client;
+
+        const presenceSub = client.subscribe(
           `/topic/interview/${roomId}/presence`,
           (message) => {
             try {
@@ -900,13 +1326,151 @@ export default function InterviewRoom() {
               if (isActive) {
                 setPresenceMessages((events) => [...events, presence].slice(-5));
               }
+
+              if (presence.event === "JOINED") {
+                if (presence.role?.toLowerCase() === "candidate") {
+                  hasCandidateJoinedRef.current = true;
+                  if (!isCandidate) {
+                    void createAndSendOffer();
+                  }
+                } else if (presence.role?.toLowerCase() === "interviewer") {
+                  if (isCandidate && client.connected) {
+                    client.publish({
+                      destination: `/app/interview/${roomId}/join`,
+                      body: JSON.stringify({}),
+                    });
+                  }
+                }
+              }
             } catch {
               console.error("Unable to parse interview presence message", message.body);
             }
           },
         );
 
-        unsubscribe = () => subscription.unsubscribe();
+        const signalSub = client.subscribe(
+          `/topic/interview/${roomId}/signal`,
+          async (message) => {
+            try {
+              const signal = JSON.parse(message.body) as WebRTCSignalMessage;
+              if (!signal || !signal.type) return;
+
+              const currentUserId = user?.id || user?._id;
+              const isFromSelf =
+                (signal.senderUserId && signal.senderUserId === currentUserId) ||
+                (signal.senderRole && signal.senderRole.toLowerCase() === userRole.toLowerCase());
+
+              if (isFromSelf) {
+                return;
+              }
+
+              const pc = peerConnectionRef.current;
+              if (!pc) return;
+
+              if (signal.type === "OFFER" && signal.sdp) {
+                console.info("Candidate received WebRTC OFFER via STOMP");
+
+                // Wait for local media acquisition if still in progress
+                if (!localStreamRef.current && mediaAcquisitionPromiseRef.current) {
+                  console.info("Waiting for local media acquisition before creating WebRTC ANSWER...");
+                  try {
+                    await mediaAcquisitionPromiseRef.current;
+                  } catch {
+                    // proceed even if media failed so remote media can still be received
+                  }
+                }
+
+                const pc = peerConnectionRef.current;
+                if (!pc) return;
+
+                // Ensure candidate's local tracks are attached before answering
+                const currentStream = localStreamRef.current;
+                if (currentStream) {
+                  const senders = pc.getSenders();
+                  currentStream.getTracks().forEach((track) => {
+                    const alreadyAdded = senders.some((sender) => sender.track === track);
+                    if (!alreadyAdded) {
+                      console.info("Candidate attaching local track before answer:", track.kind, track.id);
+                      pc.addTrack(track, currentStream);
+                    }
+                  });
+                }
+
+                await pc.setRemoteDescription(
+                  new RTCSessionDescription({ type: "offer", sdp: signal.sdp })
+                );
+                await flushQueuedRemoteCandidates();
+
+                // Re-check senders after setting remote description to ensure tracks pair with transceivers
+                if (currentStream) {
+                  const senders = pc.getSenders();
+                  currentStream.getTracks().forEach((track) => {
+                    const alreadyAdded = senders.some((sender) => sender.track === track);
+                    if (!alreadyAdded) {
+                      console.info("Candidate attaching local track to transceiver:", track.kind, track.id);
+                      pc.addTrack(track, currentStream);
+                    }
+                  });
+                }
+
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+
+                client.publish({
+                  destination: `/app/interview/${roomId}/signal`,
+                  body: JSON.stringify({
+                    roomId,
+                    type: "ANSWER",
+                    sdp: answer.sdp,
+                  }),
+                });
+                console.info("Candidate sent WebRTC ANSWER via STOMP");
+              } else if (signal.type === "ANSWER" && signal.sdp) {
+                console.info("Interviewer received WebRTC ANSWER via STOMP");
+                if (pc.signalingState === "have-local-offer") {
+                  await pc.setRemoteDescription(
+                    new RTCSessionDescription({ type: "answer", sdp: signal.sdp })
+                  );
+                  await flushQueuedRemoteCandidates();
+                  console.info("Interviewer set remote description (ANSWER). Signaling stable.");
+                } else {
+                  console.warn("Ignoring ANSWER received in signalingState:", pc.signalingState);
+                }
+              } else if (signal.type === "ICE_CANDIDATE" && signal.candidate) {
+                await processOrQueueRemoteCandidate({
+                  candidate: signal.candidate,
+                  sdpMid: signal.sdpMid ?? undefined,
+                  sdpMLineIndex: signal.sdpMLineIndex ?? undefined,
+                });
+              }
+            } catch (err) {
+              console.error("Error processing WebRTC signal:", err);
+            }
+          },
+        );
+
+        unsubscribe = () => {
+          presenceSub.unsubscribe();
+          signalSub.unsubscribe();
+        };
+
+        // Flush any queued local ICE candidates that were collected prior to connect
+        while (localIceQueueRef.current.length > 0) {
+          const c = localIceQueueRef.current.shift();
+          if (c) {
+            client.publish({
+              destination: `/app/interview/${roomId}/signal`,
+              body: JSON.stringify({
+                roomId,
+                type: "ICE_CANDIDATE",
+                candidate: c.candidate,
+                sdpMid: c.sdpMid,
+                sdpMLineIndex: c.sdpMLineIndex,
+              }),
+            });
+          }
+        }
+
         client.publish({
           destination: `/app/interview/${roomId}/join`,
           body: JSON.stringify({}),
@@ -936,9 +1500,13 @@ export default function InterviewRoom() {
     return () => {
       isActive = false;
       unsubscribe?.();
+      stompClientRef.current = null;
+      hasCandidateJoinedRef.current = false;
+      remoteIceQueueRef.current = [];
+      localIceQueueRef.current = [];
       void client.deactivate();
     };
-  }, [roomId]);
+  }, [roomId, isCandidate, user?.id, user?._id, userRole]);
 
   /* ── Fullscreen ── */
   async function toggleFullscreen() {
@@ -957,23 +1525,74 @@ export default function InterviewRoom() {
   }, []);
 
   /* ── Screen Share ── */
+  const stopScreenShare = async () => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(t => t.stop());
+      screenStreamRef.current = null;
+    }
+    setScreenStream(null);
+    setScreen(false);
+
+    // Restore camera video track on WebRTC connection
+    const pc = peerConnectionRef.current;
+    if (pc) {
+      const cameraTrack = localStreamRef.current?.getVideoTracks()[0] || null;
+      const videoSender = pc.getSenders().find(s => s.track?.kind === "video")
+        || pc.getTransceivers().find(t => t.receiver.track?.kind === "video")?.sender;
+
+      if (videoSender) {
+        try {
+          console.info("Restoring camera track on WebRTC video sender:", cameraTrack ? cameraTrack.id : "null");
+          await videoSender.replaceTrack(cameraTrack);
+        } catch (err) {
+          console.error("Error restoring camera track on WebRTC sender:", err);
+        }
+      }
+    }
+  };
+
   async function toggleScreenShare() {
-    if (screen && screenStream) {
-      screenStream.getTracks().forEach(t => t.stop());
-      setScreenStream(null);
-      setScreen(false);
+    if (screen || screenStreamRef.current) {
+      await stopScreenShare();
       return;
     }
     try {
+      console.info("Requesting display media for screen sharing...");
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-      stream.getVideoTracks()[0].addEventListener("ended", () => {
-        setScreenStream(null);
-        setScreen(false);
-      });
+      const screenTrack = stream.getVideoTracks()[0];
+
+      if (!screenTrack) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
+
+      screenStreamRef.current = stream;
       setScreenStream(stream);
       setScreen(true);
-    } catch {
-      setScreen(false);
+
+      // Handle browser's native "Stop sharing" button
+      screenTrack.addEventListener("ended", () => {
+        console.info("Screen track ended via browser UI");
+        void stopScreenShare();
+      });
+
+      // Transmit screen track over WebRTC by replacing outgoing video track
+      const pc = peerConnectionRef.current;
+      if (pc) {
+        const videoSender = pc.getSenders().find(s => s.track?.kind === "video")
+          || pc.getTransceivers().find(t => t.receiver.track?.kind === "video")?.sender;
+
+        if (videoSender) {
+          console.info("Replacing WebRTC video track with screen track:", screenTrack.id);
+          await videoSender.replaceTrack(screenTrack);
+        } else {
+          console.info("No existing video sender; adding screen track to peer connection");
+          pc.addTrack(screenTrack, stream);
+        }
+      }
+    } catch (err) {
+      console.warn("Screen share cancelled or failed:", err);
+      await stopScreenShare();
     }
   }
 
@@ -1016,16 +1635,7 @@ export default function InterviewRoom() {
       `}</style>
 
       <div ref={containerRef} data-room-id={roomId} style={{ height: "100dvh", background: C.bg, display: "flex", flexDirection: "column", overflow: "hidden", fontFamily: INTER }}>
-        <Navbar timer={timer} onLeave={() => { screenStream?.getTracks().forEach(t => t.stop()); window.location.href = "/interviewer"; }} />
-
-        <div style={{ position: "fixed", left: 18, bottom: 18, zIndex: 50, maxWidth: 360, borderRadius: 8, padding: "7px 10px", background: "rgba(15,23,42,0.92)", border: `1px solid ${C.border}`, color: C.ts, fontSize: 10, fontFamily: MONO }}>
-          <div>STOMP presence: {presenceStatus}</div>
-          {presenceMessages.slice(-2).map((presence) => (
-            <div key={`${presence.userId}-${presence.event}`} style={{ color: C.emerald, marginTop: 3 }}>
-              {presence.role} {presence.event.toLowerCase()} ({presence.userId})
-            </div>
-          ))}
-        </div>
+        <Navbar timer={timer} onLeave={handleLeave} presenceStatus={presenceStatus} presenceMessages={presenceMessages} />
 
         {/* Body */}
         <div style={{ display: "flex", flex: 1, overflow: "hidden", padding: "62px 10px 10px 10px", gap: 10 }}>
@@ -1035,7 +1645,7 @@ export default function InterviewRoom() {
             <VideoPanel
               mic={mic} cam={cam} screen={screen} handRaised={handRaised} blurred={blurred}
               showParticipants={showParticipants} whiteboardActive={whiteboardActive}
-              onMic={() => setMic(!mic)} onCam={() => setCam(!cam)}
+              onMic={toggleMic} onCam={toggleCam}
               onScreen={toggleScreenShare}
               onHand={() => setHandRaised(!handRaised)}
               onBlur={() => setBlurred(!blurred)}
@@ -1043,8 +1653,20 @@ export default function InterviewRoom() {
               onParticipants={() => setShowParticipants(!showParticipants)}
               onWhiteboard={() => setWhiteboardActive(!whiteboardActive)}
               screenStream={screenStream}
+              localStream={localStream}
+              remoteStream={remoteStream}
+              mediaError={mediaError}
+              isCandidate={isCandidate}
+              userName={userName}
+              onLeave={handleLeave}
             />
-            {showParticipants && <ParticipantsSidebar onClose={() => setShowParticipants(false)} />}
+            {showParticipants && (
+              <ParticipantsSidebar
+                onClose={() => setShowParticipants(false)}
+                isCandidate={isCandidate}
+                userName={userName}
+              />
+            )}
           </div>
 
           {/* ── Right 35% ── */}
