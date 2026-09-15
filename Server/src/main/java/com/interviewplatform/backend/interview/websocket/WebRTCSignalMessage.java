@@ -113,4 +113,15 @@ public class WebRTCSignalMessage {
     public void setSdpMLineIndex(Integer sdpMLineIndex) {
         this.sdpMLineIndex = sdpMLineIndex;
     }
+
+    // Hand raise field
+    private Boolean raised;
+
+    public Boolean getRaised() {
+        return raised;
+    }
+
+    public void setRaised(Boolean raised) {
+        this.raised = raised;
+    }
 }

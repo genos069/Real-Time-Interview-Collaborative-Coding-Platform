@@ -21,6 +21,28 @@ export const startInterviewRoom = async (roomId: string): Promise<InterviewRoomR
   return data;
 };
 
+export interface InterviewDetailsResponse {
+  id: string;
+  roomId: string;
+  title: string;
+  targetRole: string;
+  interviewType: string;
+  interviewerId: string;
+  candidateId: string;
+  candidateEmail: string;
+  observerId?: string | null;
+  status: "CREATED" | "ACTIVE" | "COMPLETED";
+  createdAt?: string;
+  startedAt?: string;
+  currentCode?: string;
+  language?: string;
+}
+
+export const getInterviewRoom = async (roomId: string): Promise<InterviewDetailsResponse> => {
+  const { data } = await API.get(`/interviews/${roomId}`);
+  return data;
+};
+
 export const joinInterviewRoom = async (roomId: string): Promise<InterviewRoomRecord> => {
   const { data } = await API.post(`/interviews/${roomId}/join`);
   return data;

@@ -81,11 +81,12 @@ export const router = createBrowserRouter([
     ErrorBoundary: RouteError,
   },
   {
-    path: "*",
-    Component: RouteError,
-  },
-  { path: "/interview-room/:roomId",
+    path: "/interview-room/:roomId",
     Component: InterviewRoom,
     ErrorBoundary: RouteError,
+  },
+  {
+    path: "*",
+    Component: RouteError,
   }
 ]);

@@ -130,6 +130,19 @@ public class InterviewPresenceController {
         }
 
         /*
+         * OBSERVER
+         */
+        if ("observer".equalsIgnoreCase(
+                user.getRole()
+        )) {
+
+            authorized =
+                    user.getId().equals(
+                            interview.getObserverId()
+                    );
+        }
+
+        /*
          * ============================================================
          * REJECT UNAUTHORIZED USER
          * ============================================================
@@ -151,11 +164,108 @@ public class InterviewPresenceController {
 
         presence.setRoomId(roomId);
         presence.setUserId(user.getId());
+        presence.setName(user.getName());
         presence.setRole(user.getRole());
         presence.setEvent("JOINED");
 
         System.out.println(
                 "User joined interview room: "
+                        + roomId
+                        + " | "
+                        + user.getRole()
+                        + " | "
+                        + user.getId()
+        );
+
+        return presence;
+    }
+
+    @MessageMapping("/interview/{roomId}/leave")
+    @SendTo("/topic/interview/{roomId}/presence")
+    public PresenceMessage leaveInterview(
+            @DestinationVariable String roomId,
+            Authentication authentication
+    ) {
+
+        /*
+         * ============================================================
+         * CHECK WEBSOCKET AUTHENTICATION
+         * ============================================================
+         */
+        if (authentication == null) {
+
+            throw new RuntimeException(
+                    "WebSocket authentication is missing"
+            );
+        }
+
+        /*
+         * ============================================================
+         * FIND USER
+         * ============================================================
+         */
+        User user =
+                userService.getUserByEmail(
+                        authentication.getName()
+                );
+
+        if (user == null) {
+
+            throw new RuntimeException(
+                    "Authenticated user not found"
+            );
+        }
+
+        /*
+         * ============================================================
+         * FIND INTERVIEW ROOM
+         * ============================================================
+         */
+        Interview interview =
+                interviewRepository.findByRoomId(roomId)
+                        .orElseThrow(() ->
+                                new RuntimeException(
+                                        "Interview room not found"
+                                )
+                        );
+
+        /*
+         * ============================================================
+         * CHECK ROOM AUTHORIZATION
+         * ============================================================
+         */
+        boolean authorized = false;
+
+        if ("interviewer".equalsIgnoreCase(user.getRole())) {
+            authorized = user.getId().equals(interview.getInterviewerId());
+        } else if ("candidate".equalsIgnoreCase(user.getRole())) {
+            authorized = user.getId().equals(interview.getCandidateId());
+        } else if ("observer".equalsIgnoreCase(user.getRole())) {
+            authorized = user.getId().equals(interview.getObserverId());
+        }
+
+        if (!authorized) {
+            throw new RuntimeException(
+                    "You are not authorized for this interview room"
+            );
+        }
+
+        /*
+         * ============================================================
+         * CREATE PRESENCE MESSAGE
+         * ============================================================
+         */
+        PresenceMessage presence =
+                new PresenceMessage();
+
+        presence.setRoomId(roomId);
+        presence.setUserId(user.getId());
+        presence.setName(user.getName());
+        presence.setRole(user.getRole());
+        presence.setEvent("LEFT");
+
+        System.out.println(
+                "User left interview room: "
                         + roomId
                         + " | "
                         + user.getRole()

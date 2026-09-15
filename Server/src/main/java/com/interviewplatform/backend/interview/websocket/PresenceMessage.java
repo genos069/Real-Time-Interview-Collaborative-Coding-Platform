@@ -8,6 +8,8 @@ public class PresenceMessage {
 
     private String role;
 
+    private String name;
+
     private String event;
 
 
@@ -41,6 +43,14 @@ public class PresenceMessage {
 
     public void setRole(String role) {
         this.role = role;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
     }
 
     public String getEvent() {

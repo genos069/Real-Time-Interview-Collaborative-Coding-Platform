@@ -1,10 +1,17 @@
+import API from "../../../services/api";
+
 const USER_KEY = "user";
 const TOKEN_KEY = "token";
 
+export type UserRole = "candidate" | "interviewer" | "observer";
+
 export type User = {
+  id?: string;
+  _id?: string;
+  userId?: string;
   name?: string;
   email?: string;
-  role?: "candidate" | "interviewer";
+  role?: UserRole;
   [key: string]: any;
 };
 
@@ -19,7 +26,13 @@ export const getUser = (): User | null => {
     const raw = localStorage.getItem(USER_KEY);
 
     if (raw && raw !== "undefined") {
-      return JSON.parse(raw) as User;
+      const parsed = JSON.parse(raw) as User;
+      if (parsed && (parsed.id || parsed._id || parsed.userId || parsed.email)) {
+        return {
+          ...parsed,
+          id: parsed.id || parsed._id || parsed.userId,
+        };
+      }
     }
   } catch {
     // fallback to token
@@ -32,8 +45,11 @@ export const getUser = (): User | null => {
       if (parts.length >= 2) {
         const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
         const rawRole = String(payload?.role || "").toLowerCase().replace(/^role_/, "");
-        const role = (rawRole === "candidate" || rawRole === "interviewer") ? rawRole : undefined;
+        const role = (rawRole === "candidate" || rawRole === "interviewer" || rawRole === "observer") ? (rawRole as UserRole) : undefined;
+        const id = payload?.userId || payload?.id;
         return {
+          id,
+          userId: id,
           email: payload?.sub,
           role,
           name: payload?.name,
@@ -45,6 +61,30 @@ export const getUser = (): User | null => {
   }
 
   return null;
+};
+
+export const fetchCurrentUser = async (): Promise<User | null> => {
+  try {
+    const token = getToken();
+    if (!token) return null;
+    const { data } = await API.get("/user/me");
+    if (data && data.id) {
+      const rawRole = String(data.role || "").toLowerCase().replace(/^role_/, "");
+      const role = (rawRole === "candidate" || rawRole === "interviewer" || rawRole === "observer") ? (rawRole as UserRole) : undefined;
+      const u: User = {
+        id: data.id,
+        userId: data.id,
+        name: data.name,
+        email: data.email,
+        role,
+      };
+      saveUser(u);
+      return u;
+    }
+  } catch (err) {
+    console.warn("Unable to fetch current user from /user/me:", err);
+  }
+  return getUser();
 };
 
 export const clearUser = () => {
@@ -86,10 +126,10 @@ export const isLoggedIn = (): boolean => {
 
 /* ---------------- ROLE ---------------- */
 
-export const getUserRole = (): "candidate" | "interviewer" => {
+export const getUserRole = (): "candidate" | "interviewer" | "observer" => {
   const user = getUser();
   const rawRole = user?.role?.toLowerCase().replace(/^role_/, "");
-  if (rawRole === "candidate" || rawRole === "interviewer") {
+  if (rawRole === "candidate" || rawRole === "interviewer" || rawRole === "observer") {
     return rawRole;
   }
 
@@ -100,7 +140,7 @@ export const getUserRole = (): "candidate" | "interviewer" => {
       if (parts.length >= 2) {
         const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
         const role = String(payload?.role || "").toLowerCase().replace(/^role_/, "");
-        if (role === "candidate" || role === "interviewer") {
+        if (role === "candidate" || role === "interviewer" || role === "observer") {
           return role;
         }
       }

@@ -12,13 +12,16 @@ import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
 
+import java.time.Instant;
+import java.util.UUID;
+
 @Controller
-public class WebRTCSignalingController {
+public class InterviewWhiteboardController {
 
     private final UserService userService;
     private final InterviewRepository interviewRepository;
 
-    public WebRTCSignalingController(
+    public InterviewWhiteboardController(
             UserService userService,
             InterviewRepository interviewRepository
     ) {
@@ -26,11 +29,11 @@ public class WebRTCSignalingController {
         this.interviewRepository = interviewRepository;
     }
 
-    @MessageMapping("/interview/{roomId}/signal")
-    @SendTo("/topic/interview/{roomId}/signal")
-    public WebRTCSignalMessage relaySignal(
+    @MessageMapping("/interview/{roomId}/whiteboard")
+    @SendTo("/topic/interview/{roomId}/whiteboard")
+    public InterviewWhiteboardMessage relayWhiteboardOperation(
             @DestinationVariable String roomId,
-            @Payload WebRTCSignalMessage message,
+            @Payload InterviewWhiteboardMessage message,
             Authentication authentication
     ) {
         /*
@@ -49,9 +52,13 @@ public class WebRTCSignalingController {
 
         /*
          * ============================================================
-         * 2. FIND INTERVIEW ROOM & VERIFY ACTIVE
+         * 2. VALIDATE ROOM ID & FIND ACTIVE INTERVIEW ROOM
          * ============================================================
          */
+        if (roomId == null || roomId.trim().isEmpty()) {
+            throw new IllegalArgumentException("Room ID must not be empty");
+        }
+
         Interview interview = interviewRepository.findByRoomId(roomId)
                 .orElseThrow(() -> new RuntimeException("Interview room not found"));
 
@@ -77,45 +84,48 @@ public class WebRTCSignalingController {
 
         /*
          * ============================================================
-         * 4. VALIDATE SIGNAL TYPE (OFFER, ANSWER, ICE_CANDIDATE, RAISE_HAND, LOWER_HAND, or HAND_STATE)
+         * 4. VALIDATE WHITEBOARD OPERATION PAYLOAD
          * ============================================================
          */
-        String type = message != null ? message.getType() : null;
-        if (!"OFFER".equalsIgnoreCase(type)
-                && !"ANSWER".equalsIgnoreCase(type)
-                && !"ICE_CANDIDATE".equalsIgnoreCase(type)
-                && !"RAISE_HAND".equalsIgnoreCase(type)
-                && !"LOWER_HAND".equalsIgnoreCase(type)
-                && !"HAND_STATE".equalsIgnoreCase(type)) {
-            throw new IllegalArgumentException("Unsupported or missing signal type: " + type);
+        if (message == null || message.getType() == null || message.getType().trim().isEmpty()) {
+            throw new IllegalArgumentException("Whiteboard operation type must not be empty");
+        }
+
+        String type = message.getType().trim().toUpperCase();
+        if (!"STROKE".equals(type)
+                && !"SHAPE".equals(type)
+                && !"CLEAR".equals(type)
+                && !"UNDO".equals(type)) {
+            throw new IllegalArgumentException("Unsupported whiteboard operation type: " + type);
         }
 
         /*
          * ============================================================
-         * 5. BUILD AND RELAY SANITIZED SIGNALING MESSAGE
+         * 5. BUILD AND BROADCAST SANITIZED WHITEBOARD MESSAGE
          * ============================================================
-         * SDP and ICE candidates are NEVER persisted to MongoDB. Actual
-         * media does not pass through Spring Boot.
+         * SENDER IDENTITY AND ROLE ARE STRICTLY DERIVED FROM AUTHENTICATION CONTEXT.
+         * WHITEBOARD DATA IS TRANSIENT REAL-TIME SESSION DATA (NOT PERSISTED IN MONGODB).
          */
-        WebRTCSignalMessage response = new WebRTCSignalMessage();
+        InterviewWhiteboardMessage response = new InterviewWhiteboardMessage();
+        response.setId(message.getId() != null && !message.getId().trim().isEmpty()
+                ? message.getId().trim()
+                : UUID.randomUUID().toString());
         response.setRoomId(roomId);
         response.setSenderUserId(user.getId());
         response.setSenderRole(user.getRole());
-        response.setType(type.toUpperCase());
-        response.setSdp(message.getSdp());
-        response.setCandidate(message.getCandidate());
-        response.setSdpMid(message.getSdpMid());
-        response.setSdpMLineIndex(message.getSdpMLineIndex());
-        if ("RAISE_HAND".equalsIgnoreCase(type)) {
-            response.setRaised(true);
-        } else if ("LOWER_HAND".equalsIgnoreCase(type)) {
-            response.setRaised(false);
-        } else {
-            response.setRaised(message.getRaised());
-        }
+        response.setType(type);
+        response.setTool(message.getTool());
+        response.setColor(message.getColor());
+        response.setSize(message.getSize());
+        response.setStartX(message.getStartX());
+        response.setStartY(message.getStartY());
+        response.setEndX(message.getEndX());
+        response.setEndY(message.getEndY());
+        response.setPoints(message.getPoints());
+        response.setTimestamp(Instant.now().toString());
 
         System.out.println(
-                "Relaying WebRTC " + response.getType()
+                "Relaying whiteboard " + response.getType()
                         + " for room: " + roomId
                         + " from " + user.getRole() + " (" + user.getId() + ")"
         );

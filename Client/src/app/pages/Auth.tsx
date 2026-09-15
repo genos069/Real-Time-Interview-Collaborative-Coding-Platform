@@ -82,10 +82,16 @@ export default function Auth() {
       // Save JWT
       localStorage.setItem("token", response.data.token);
 
-      // Save user data if returned
+      // Save user data
+      const userData = response.data?.user || {
+        id: response.data?.id,
+        name: response.data?.name,
+        email: response.data?.email,
+        role: response.data?.role ? String(response.data.role).toLowerCase().replace(/^role_/, "") : role,
+      };
       localStorage.setItem(
         "user",
-        JSON.stringify(response.data.user)
+        JSON.stringify(userData)
       );
       setLoading(false);
 

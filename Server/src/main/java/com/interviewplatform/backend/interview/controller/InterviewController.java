@@ -50,6 +50,17 @@ public class InterviewController {
         );
     }
 
+    // Get interview room details
+    @GetMapping("/{roomId}")
+    public ResponseEntity<Interview> getInterviewByRoomId(
+            @PathVariable String roomId
+    ) {
+        Interview interview =
+                interviewService.getInterviewByRoomId(roomId);
+
+        return ResponseEntity.ok(interview);
+    }
+
     // Start interview
 
     @PostMapping("/{roomId}/start")

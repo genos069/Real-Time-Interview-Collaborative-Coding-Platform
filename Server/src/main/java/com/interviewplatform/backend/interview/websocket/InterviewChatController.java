@@ -12,13 +12,16 @@ import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
 
+import java.time.Instant;
+import java.util.UUID;
+
 @Controller
-public class WebRTCSignalingController {
+public class InterviewChatController {
 
     private final UserService userService;
     private final InterviewRepository interviewRepository;
 
-    public WebRTCSignalingController(
+    public InterviewChatController(
             UserService userService,
             InterviewRepository interviewRepository
     ) {
@@ -26,11 +29,11 @@ public class WebRTCSignalingController {
         this.interviewRepository = interviewRepository;
     }
 
-    @MessageMapping("/interview/{roomId}/signal")
-    @SendTo("/topic/interview/{roomId}/signal")
-    public WebRTCSignalMessage relaySignal(
+    @MessageMapping("/interview/{roomId}/chat")
+    @SendTo("/topic/interview/{roomId}/chat")
+    public InterviewChatMessage sendChatMessage(
             @DestinationVariable String roomId,
-            @Payload WebRTCSignalMessage message,
+            @Payload InterviewChatMessage message,
             Authentication authentication
     ) {
         /*
@@ -49,9 +52,13 @@ public class WebRTCSignalingController {
 
         /*
          * ============================================================
-         * 2. FIND INTERVIEW ROOM & VERIFY ACTIVE
+         * 2. VALIDATE ROOM ID & FIND ACTIVE INTERVIEW ROOM
          * ============================================================
          */
+        if (roomId == null || roomId.trim().isEmpty()) {
+            throw new IllegalArgumentException("Room ID must not be empty");
+        }
+
         Interview interview = interviewRepository.findByRoomId(roomId)
                 .orElseThrow(() -> new RuntimeException("Interview room not found"));
 
@@ -77,46 +84,38 @@ public class WebRTCSignalingController {
 
         /*
          * ============================================================
-         * 4. VALIDATE SIGNAL TYPE (OFFER, ANSWER, ICE_CANDIDATE, RAISE_HAND, LOWER_HAND, or HAND_STATE)
+         * 4. VALIDATE CHAT MESSAGE PAYLOAD
          * ============================================================
          */
-        String type = message != null ? message.getType() : null;
-        if (!"OFFER".equalsIgnoreCase(type)
-                && !"ANSWER".equalsIgnoreCase(type)
-                && !"ICE_CANDIDATE".equalsIgnoreCase(type)
-                && !"RAISE_HAND".equalsIgnoreCase(type)
-                && !"LOWER_HAND".equalsIgnoreCase(type)
-                && !"HAND_STATE".equalsIgnoreCase(type)) {
-            throw new IllegalArgumentException("Unsupported or missing signal type: " + type);
+        if (message == null || message.getText() == null || message.getText().trim().isEmpty()) {
+            throw new IllegalArgumentException("Chat message text must not be empty");
         }
 
         /*
          * ============================================================
-         * 5. BUILD AND RELAY SANITIZED SIGNALING MESSAGE
+         * 5. BUILD AND BROADCAST SANITIZED CHAT MESSAGE
          * ============================================================
-         * SDP and ICE candidates are NEVER persisted to MongoDB. Actual
-         * media does not pass through Spring Boot.
+         * Sender identity, role, and server-side timestamp are strictly
+         * populated from authenticated state, not trusted from client payload.
          */
-        WebRTCSignalMessage response = new WebRTCSignalMessage();
-        response.setRoomId(roomId);
-        response.setSenderUserId(user.getId());
-        response.setSenderRole(user.getRole());
-        response.setType(type.toUpperCase());
-        response.setSdp(message.getSdp());
-        response.setCandidate(message.getCandidate());
-        response.setSdpMid(message.getSdpMid());
-        response.setSdpMLineIndex(message.getSdpMLineIndex());
-        if ("RAISE_HAND".equalsIgnoreCase(type)) {
-            response.setRaised(true);
-        } else if ("LOWER_HAND".equalsIgnoreCase(type)) {
-            response.setRaised(false);
+        String senderName = user.getName();
+        if (senderName == null || senderName.trim().isEmpty()) {
+            senderName = "interviewer".equalsIgnoreCase(user.getRole()) ? "Interviewer" : "Candidate";
         } else {
-            response.setRaised(message.getRaised());
+            senderName = senderName.trim();
         }
 
+        InterviewChatMessage response = new InterviewChatMessage();
+        response.setId(UUID.randomUUID().toString());
+        response.setRoomId(roomId);
+        response.setSenderUserId(user.getId());
+        response.setSenderName(senderName);
+        response.setSenderRole(user.getRole());
+        response.setText(message.getText().trim());
+        response.setTimestamp(Instant.now().toString());
+
         System.out.println(
-                "Relaying WebRTC " + response.getType()
-                        + " for room: " + roomId
+                "Relaying chat message for room: " + roomId
                         + " from " + user.getRole() + " (" + user.getId() + ")"
         );
 

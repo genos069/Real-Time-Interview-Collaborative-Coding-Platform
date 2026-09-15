@@ -21,10 +21,29 @@ public class JwtUtil {
             String email,
             String role
     ) {
+        return generateToken(email, role, null, null);
+    }
 
-        return Jwts.builder()
+    public String generateToken(
+            String email,
+            String role,
+            String userId,
+            String name
+    ) {
+
+        var builder = Jwts.builder()
                 .subject(email)
-                .claim("role", role)
+                .claim("role", role);
+
+        if (userId != null && !userId.trim().isEmpty()) {
+            builder.claim("userId", userId.trim());
+        }
+
+        if (name != null && !name.trim().isEmpty()) {
+            builder.claim("name", name.trim());
+        }
+
+        return builder
                 .issuedAt(new Date())
                 .expiration(
                         new Date(

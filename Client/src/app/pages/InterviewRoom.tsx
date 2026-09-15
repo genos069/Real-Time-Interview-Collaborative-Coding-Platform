@@ -1,20 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "react-router";
 import { Client } from "@stomp/stompjs";
-import { getToken, getUser, getUserRole } from "../bot/utils/auth";
+import { getToken, getUser, getUserRole, fetchCurrentUser, type User } from "../bot/utils/auth";
 import { InterviewCodeEditor } from "../components/InterviewCodeEditor";
 import {
   getInterviewCodeSnapshot,
   runInterviewCode,
+  getInterviewRoom,
+  type InterviewDetailsResponse,
   type CodeSyncMessage,
   type RunInterviewCodeResponse,
 } from "../../services/interviewRoomService";
 import {
   Mic, MicOff, Video, VideoOff, Monitor, MonitorOff, Hand, Maximize2, Minimize2,
   Users, PhoneOff, MessageSquare, Code2, Send, ChevronDown, Play, RotateCcw,
-  Map, WrapText, Expand, Wifi, Clock, Terminal, CheckCircle2, XCircle,
+  Map, WrapText, Wifi, Clock, Terminal, CheckCircle2,
   Keyboard, X, Blend, Copy, ChevronRight, PenLine, Eraser, Minus,
-  Square, Circle, Type, Undo2, Trash2, Palette, MoreVertical, Loader2,
+  Square, Circle, Undo2, Trash2, Palette, MoreVertical, Loader2,
+  ShieldAlert, LogOut,
 } from "lucide-react";
 
 /* ─── constants ─── */
@@ -79,18 +82,54 @@ type PresenceMessage = {
   roomId: string;
   userId: string;
   role: string;
+  name?: string;
   event: string;
+};
+
+export type DrawTool = "pen" | "eraser" | "line" | "rect" | "circle";
+
+export type WhiteboardPoint = {
+  x: number;
+  y: number;
+};
+
+export type InterviewWhiteboardMessage = {
+  id?: string;
+  roomId: string;
+  senderUserId?: string;
+  senderRole?: string;
+  type: "STROKE" | "SHAPE" | "CLEAR" | "UNDO";
+  tool?: DrawTool;
+  color?: string;
+  size?: number;
+  startX?: number;
+  startY?: number;
+  endX?: number;
+  endY?: number;
+  points?: WhiteboardPoint[];
+  timestamp?: string;
+};
+
+export type InterviewChatMessage = {
+  id: string;
+  roomId: string;
+  senderUserId: string;
+  senderName: string;
+  senderRole: string;
+  text: string;
+  timestamp: string;
 };
 
 type WebRTCSignalMessage = {
   roomId: string;
   senderUserId?: string;
   senderRole?: string;
-  type: "OFFER" | "ANSWER" | "ICE_CANDIDATE";
+  type: "OFFER" | "ANSWER" | "ICE_CANDIDATE" | "RAISE_HAND" | "LOWER_HAND" | "HAND_STATE";
   sdp?: string;
   candidate?: string;
   sdpMid?: string | null;
   sdpMLineIndex?: number | null;
+  raised?: boolean;
 };
 
 function getWebSocketUrl() {
@@ -122,17 +161,49 @@ function GlassCard({ children, className, style }: { children: React.ReactNode; 
   );
 }
 
+export function getInitials(name?: string, fallback = "U"): string {
+  if (!name) return fallback;
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return fallback;
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+export function getRoleColor(role?: string): string {
+  const r = (role || "").toLowerCase();
+  if (r === "candidate") return "#7C3AED";
+  if (r === "observer") return "#059669";
+  return "#1D4ED8"; // interviewer or default
+}
+
+export interface RoomParticipant {
+  id?: string | number;
+  userId: string;
+  name: string;
+  role: string;
+  ini: string;
+  color: string;
+  isSelf: boolean;
+  mic: boolean;
+  cam: boolean;
+  speaking: boolean;
+  handRaised: boolean;
+  ping: number;
+}
+
 /* ─── Navbar ─── */
 function Navbar({
   timer,
   onLeave,
   presenceStatus = "Connecting",
   presenceMessages = [],
+  participants = [],
 }: {
   timer: string;
   onLeave: () => void;
   presenceStatus?: string;
   presenceMessages?: PresenceMessage[];
+  participants?: RoomParticipant[];
 }) {
   const [showPresence, setShowPresence] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -152,6 +223,9 @@ function Navbar({
   const statusColor = isConnected ? C.emerald : presenceStatus === "Connecting" ? C.amber : C.rose;
   const statusLabel = isConnected ? "STOMP Connected" : (presenceStatus ? `STOMP: ${presenceStatus}` : "STOMP Disconnected");
 
+  const count = participants.length;
+  const countLabel = `${count} ${count === 1 ? "participant" : "participants"}`;
+
   return (
     <nav style={{
       position: "fixed", top: 0, left: 0, right: 0, zIndex: 60, height: 52,
@@ -168,8 +242,6 @@ function Navbar({
         <span style={{ color: C.tp, fontWeight: 700, fontSize: 14, letterSpacing: -0.3 }}>
           Code<span style={{ color: C.blue }}>Gear</span>
         </span>
-        <div style={{ width: 1, height: 16, background: C.border, margin: "0 6px" }} />
-        <span style={{ color: C.tm, fontSize: 11 }}>Senior Frontend · Round 2</span>
       </div>
 
       {/* Center */}
@@ -180,19 +252,37 @@ function Navbar({
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <div style={{ width: 6, height: 6, borderRadius: "50%", background: C.rose, boxShadow: `0 0 6px ${C.rose}`, animation: "pulse 1.5s infinite" }} />
-          <span style={{ color: C.rose, fontSize: 11, fontWeight: 600 }}>REC</span>
+          <span style={{ color: C.rose, fontSize: 11, fontWeight: 600 }}>LIVE</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <Wifi size={12} color={C.emerald} />
-          <span style={{ color: C.emerald, fontSize: 11, fontWeight: 600 }}>24ms</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <div style={{ display: "flex" }}>
-            {["PN", "SL"].map((ini, i) => (
-              <div key={ini} style={{ width: 24, height: 24, borderRadius: "50%", background: i === 0 ? "#7C3AED" : "#1D4ED8", border: `2px solid ${C.bg}`, marginLeft: i > 0 ? -7 : 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, color: "#fff", fontWeight: 700 }}>{ini}</div>
+            {participants.slice(0, 4).map((p, i) => (
+              <div
+                key={p.userId || i}
+                title={`${p.name} (${p.role})`}
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: "50%",
+                  background: p.color,
+                  border: `2px solid ${C.bg}`,
+                  marginLeft: i > 0 ? -7 : 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 8,
+                  color: "#fff",
+                  fontWeight: 700,
+                }}
+              >
+                {p.ini}
+              </div>
             ))}
           </div>
-          <span style={{ color: C.ts, fontSize: 11, fontWeight: 500 }}>2 participants</span>
+          <span style={{ color: C.ts, fontSize: 11, fontWeight: 500 }}>{countLabel}</span>
         </div>
         <div ref={dropdownRef} style={{ position: "relative" }}>
           <button
@@ -274,15 +364,13 @@ function Navbar({
 }
 
 /* ─── Participants Sidebar ─── */
-function ParticipantsSidebar({ onClose, isCandidate, userName }: { onClose: () => void; isCandidate?: boolean; userName?: string }) {
-  const candidateDisplayName = isCandidate && userName ? `${userName} (You)` : (isCandidate ? "Priya Nair (You)" : "Priya Nair");
-  const interviewerDisplayName = !isCandidate && userName ? `${userName} (You)` : (!isCandidate ? "Sarah Lin (You)" : "Sarah Lin");
-  const participants = [
-    { id: 1, name: candidateDisplayName, role: "Candidate", ini: "PN", color: "#7C3AED", mic: true, cam: true, ping: 22, speaking: true },
-    { id: 2, name: interviewerDisplayName, role: "Interviewer", ini: "SL", color: "#1D4ED8", mic: true, cam: true, ping: 18, speaking: false },
-    { id: 3, name: "James Okafor", role: "Observer", ini: "JO", color: "#059669", mic: false, cam: false, ping: 105, speaking: false },
-  ];
-
+function ParticipantsSidebar({
+  onClose,
+  participants = [],
+}: {
+  onClose: () => void;
+  participants?: RoomParticipant[];
+}) {
   return (
     <div style={{
       position: "absolute", top: 0, right: 0, bottom: 0, zIndex: 30,
@@ -308,14 +396,16 @@ function ParticipantsSidebar({ onClose, isCandidate, userName }: { onClose: () =
 
       {/* List */}
       <div style={{ flex: 1, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
-        {participants.map(p => (
-          <div key={p.id} style={{
-            display: "flex", alignItems: "center", gap: 10,
-            padding: "10px 12px", borderRadius: 12,
-            background: "rgba(255,255,255,0.03)",
-            border: `1px solid ${p.speaking ? C.emerald + "40" : C.border}`,
-            transition: "border-color 0.3s",
-          }}>
+        {participants.map(p => {
+          const displayName = p.isSelf ? `${p.name} (You)` : p.name;
+          return (
+            <div key={p.userId || p.id} style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "10px 12px", borderRadius: 12,
+              background: "rgba(255,255,255,0.03)",
+              border: `1px solid ${p.speaking ? C.emerald + "40" : C.border}`,
+              transition: "border-color 0.3s",
+            }}>
             {/* Avatar with speaking ring */}
             <div style={{ position: "relative", flexShrink: 0 }}>
               <div style={{ width: 36, height: 36, borderRadius: "50%", background: p.color, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 700, boxShadow: p.speaking ? `0 0 0 2px ${C.emerald}` : undefined }}>
@@ -328,7 +418,27 @@ function ParticipantsSidebar({ onClose, isCandidate, userName }: { onClose: () =
 
             {/* Info */}
             <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ color: C.tp, fontSize: 12, fontWeight: 600, marginBottom: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</p>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ color: C.tp, fontSize: 12, fontWeight: 600, marginBottom: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{displayName}</span>
+                {p.handRaised && (
+                  <span
+                    title={`${displayName}'s hand is raised`}
+                    aria-label="Hand raised"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: "rgba(245,158,11,0.2)",
+                      border: "1px solid rgba(245,158,11,0.45)",
+                      borderRadius: 4,
+                      padding: "2px 4px",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Hand size={11} color={C.amber} />
+                  </span>
+                )}
+              </div>
               <p style={{ color: C.tm, fontSize: 10 }}>{p.role}</p>
             </div>
 
@@ -345,7 +455,8 @@ function ParticipantsSidebar({ onClose, isCandidate, userName }: { onClose: () =
               </button>
             </div>
           </div>
-        ))}
+        );
+      })}
       </div>
 
       {/* Footer */}
@@ -364,92 +475,384 @@ function ParticipantsSidebar({ onClose, isCandidate, userName }: { onClose: () =
 }
 
 /* ─── Whiteboard ─── */
-type DrawTool = "pen" | "eraser" | "line" | "rect" | "circle";
+function drawStrokeOnCtx(
+  ctx: CanvasRenderingContext2D,
+  tool: DrawTool,
+  color: string,
+  size: number,
+  points: WhiteboardPoint[]
+) {
+  if (!points || points.length === 0) return;
+  ctx.save();
+  if (tool === "eraser") {
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.lineWidth = size * 4;
+  } else {
+    ctx.globalCompositeOperation = "source-over";
+    ctx.strokeStyle = color;
+    ctx.lineWidth = size;
+  }
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  if (points.length === 1) {
+    ctx.lineTo(points[0].x + 0.01, points[0].y);
+  } else {
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+  }
+  ctx.stroke();
+  ctx.restore();
+}
 
-function Whiteboard({ onClose }: { onClose: () => void }) {
+function drawShapeOnCtx(
+  ctx: CanvasRenderingContext2D,
+  tool: DrawTool,
+  color: string,
+  size: number,
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number
+) {
+  ctx.save();
+  ctx.globalCompositeOperation = "source-over";
+  ctx.strokeStyle = color;
+  ctx.lineWidth = size;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  if (tool === "line") {
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(endX, endY);
+  } else if (tool === "rect") {
+    ctx.rect(startX, startY, endX - startX, endY - startY);
+  } else if (tool === "circle") {
+    const rx = Math.max(0.1, Math.abs(endX - startX) / 2);
+    const ry = Math.max(0.1, Math.abs(endY - startY) / 2);
+    ctx.ellipse(startX + (endX - startX) / 2, startY + (endY - startY) / 2, rx, ry, 0, 0, Math.PI * 2);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+interface WhiteboardProps {
+  onClose: () => void;
+  roomId?: string;
+  stompClientRef?: React.MutableRefObject<Client | null>;
+  onRegisterRemoteWhiteboardHandler?: (handler: ((msg: InterviewWhiteboardMessage) => void) | null) => void;
+  currentUserId?: string;
+  userRole?: string;
+}
+
+function Whiteboard({
+  onClose,
+  roomId,
+  stompClientRef,
+  onRegisterRemoteWhiteboardHandler,
+  currentUserId,
+  userRole,
+}: WhiteboardProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const historyRef = useRef<ImageData[]>([]);
   const [tool, setTool] = useState<DrawTool>("pen");
   const [color, setColor] = useState("#00BFFF");
   const [size, setSize] = useState(3);
   const drawing = useRef(false);
-  const startPos = useRef({ x: 0, y: 0 });
+  const startPos = useRef<WhiteboardPoint>({ x: 0, y: 0 });
+  const lastPos = useRef<WhiteboardPoint>({ x: 0, y: 0 });
+  const currentEndPos = useRef<WhiteboardPoint>({ x: 0, y: 0 });
+  const currentPoints = useRef<WhiteboardPoint[]>([]);
   const snapshotRef = useRef<ImageData | null>(null);
+  const sentOpIdsRef = useRef<Set<string>>(new Set());
 
   const COLORS_WB = ["#F1F5F9", "#3B82F6", "#10B981", "#F43F5E", "#F59E0B", "#8B5CF6", "#EC4899", "#00BFFF"];
   const SIZES = [2, 4, 8, 14];
 
-  function getCtx() { return canvasRef.current!.getContext("2d")!; }
-  function pt(e: React.MouseEvent<HTMLCanvasElement>) {
-    const r = canvasRef.current!.getBoundingClientRect();
-    return { x: (e.clientX - r.left) * (canvasRef.current!.width / r.width), y: (e.clientY - r.top) * (canvasRef.current!.height / r.height) };
+  function getCtx() {
+    return canvasRef.current ? canvasRef.current.getContext("2d") : null;
+  }
+
+  function pt(e: React.PointerEvent<HTMLCanvasElement> | React.MouseEvent<HTMLCanvasElement>): WhiteboardPoint {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const r = canvas.getBoundingClientRect();
+    const scaleX = r.width > 0 ? (canvas.width / r.width) : 1;
+    const scaleY = r.height > 0 ? (canvas.height / r.height) : 1;
+    return {
+      x: Math.round((e.clientX - r.left) * scaleX * 10) / 10,
+      y: Math.round((e.clientY - r.top) * scaleY * 10) / 10,
+    };
   }
 
   function saveHistory() {
+    if (!canvasRef.current) return;
     const ctx = getCtx();
-    historyRef.current = [...historyRef.current.slice(-20), ctx.getImageData(0, 0, canvasRef.current!.width, canvasRef.current!.height)];
+    if (!ctx) return;
+    historyRef.current = [
+      ...historyRef.current.slice(-20),
+      ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height),
+    ];
   }
+
+  const publishOperation = useCallback((msg: InterviewWhiteboardMessage) => {
+    const client = stompClientRef?.current;
+    if (!client || !client.connected || !roomId) {
+      return;
+    }
+    try {
+      client.publish({
+        destination: `/app/interview/${roomId}/whiteboard`,
+        body: JSON.stringify(msg),
+      });
+    } catch (err) {
+      console.error("Failed to publish whiteboard operation:", err);
+    }
+  }, [roomId, stompClientRef]);
 
   function undo() {
     const prev = historyRef.current.pop();
-    if (prev) getCtx().putImageData(prev, 0, 0);
+    const ctx = getCtx();
+    if (!ctx || !canvasRef.current) return;
+
+    if (prev) {
+      ctx.putImageData(prev, 0, 0);
+    } else {
+      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    }
+
+    if (!roomId) return;
+    const opId = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+    sentOpIdsRef.current.add(opId);
+    publishOperation({
+      id: opId,
+      roomId,
+      senderUserId: currentUserId,
+      senderRole: userRole,
+      type: "UNDO",
+    });
   }
 
   function clear() {
     saveHistory();
-    const c = canvasRef.current!;
-    getCtx().clearRect(0, 0, c.width, c.height);
+    const ctx = getCtx();
+    if (ctx && canvasRef.current) {
+      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    }
+
+    if (!roomId) return;
+    const opId = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+    sentOpIdsRef.current.add(opId);
+    publishOperation({
+      id: opId,
+      roomId,
+      senderUserId: currentUserId,
+      senderRole: userRole,
+      type: "CLEAR",
+    });
   }
 
-  function onDown(e: React.MouseEvent<HTMLCanvasElement>) {
+  const handleRemoteOperation = useCallback((msg: InterviewWhiteboardMessage) => {
+    if (!msg || !canvasRef.current) return;
+
+    // Prevent echoing/duplicating our own operations
+    if (msg.id && sentOpIdsRef.current.has(msg.id)) {
+      return;
+    }
+    if (msg.senderUserId && currentUserId && msg.senderUserId === currentUserId) {
+      return;
+    }
+
+    const ctx = getCtx();
+    if (!ctx) return;
+
+    if (msg.type === "STROKE" && msg.points && msg.points.length > 0) {
+      saveHistory();
+      drawStrokeOnCtx(
+        ctx,
+        msg.tool || "pen",
+        msg.color || "#00BFFF",
+        msg.size || 3,
+        msg.points
+      );
+    } else if (msg.type === "SHAPE" && msg.startX !== undefined && msg.startY !== undefined && msg.endX !== undefined && msg.endY !== undefined) {
+      saveHistory();
+      drawShapeOnCtx(
+        ctx,
+        msg.tool || "line",
+        msg.color || "#00BFFF",
+        msg.size || 3,
+        msg.startX,
+        msg.startY,
+        msg.endX,
+        msg.endY
+      );
+    } else if (msg.type === "CLEAR") {
+      saveHistory();
+      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    } else if (msg.type === "UNDO") {
+      const prev = historyRef.current.pop();
+      if (prev) {
+        ctx.putImageData(prev, 0, 0);
+      } else {
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      }
+    }
+  }, [currentUserId]);
+
+  useEffect(() => {
+    onRegisterRemoteWhiteboardHandler?.(handleRemoteOperation);
+    return () => {
+      onRegisterRemoteWhiteboardHandler?.(null);
+    };
+  }, [onRegisterRemoteWhiteboardHandler, handleRemoteOperation]);
+
+  function onDown(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (!canvasRef.current) return;
+    try {
+      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    } catch { }
     saveHistory();
     drawing.current = true;
     const p = pt(e);
     startPos.current = p;
+    lastPos.current = p;
+    currentEndPos.current = p;
+    currentPoints.current = [p];
+
     const ctx = getCtx();
+    if (!ctx) return;
+
     if (tool === "pen" || tool === "eraser") {
+      ctx.save();
+      if (tool === "eraser") {
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.lineWidth = size * 4;
+      } else {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.strokeStyle = color;
+        ctx.lineWidth = size;
+      }
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.beginPath();
       ctx.moveTo(p.x, p.y);
-    }
-    snapshotRef.current = ctx.getImageData(0, 0, canvasRef.current!.width, canvasRef.current!.height);
-  }
-
-  function onMove(e: React.MouseEvent<HTMLCanvasElement>) {
-    if (!drawing.current) return;
-    const p = pt(e);
-    const ctx = getCtx();
-
-    if (tool === "pen") {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = color; ctx.lineWidth = size; ctx.lineCap = "round"; ctx.lineJoin = "round";
-      ctx.lineTo(p.x, p.y); ctx.stroke();
-    } else if (tool === "eraser") {
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.lineWidth = size * 4; ctx.lineCap = "round";
-      ctx.lineTo(p.x, p.y); ctx.stroke();
-    } else {
-      if (snapshotRef.current) ctx.putImageData(snapshotRef.current, 0, 0);
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = color; ctx.lineWidth = size; ctx.lineCap = "round";
-      const s = startPos.current;
-      ctx.beginPath();
-      if (tool === "line") {
-        ctx.moveTo(s.x, s.y); ctx.lineTo(p.x, p.y);
-      } else if (tool === "rect") {
-        ctx.rect(s.x, s.y, p.x - s.x, p.y - s.y);
-      } else if (tool === "circle") {
-        const rx = Math.abs(p.x - s.x) / 2, ry = Math.abs(p.y - s.y) / 2;
-        ctx.ellipse(s.x + (p.x - s.x) / 2, s.y + (p.y - s.y) / 2, rx, ry, 0, 0, Math.PI * 2);
-      }
+      ctx.lineTo(p.x + 0.01, p.y);
       ctx.stroke();
+      ctx.restore();
+    }
+    snapshotRef.current = ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height);
+  }
+
+  function onMove(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (!drawing.current || !canvasRef.current) return;
+    const p = pt(e);
+    currentEndPos.current = p;
+    const ctx = getCtx();
+    if (!ctx) return;
+
+    if (tool === "pen" || tool === "eraser") {
+      ctx.save();
+      if (tool === "eraser") {
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.lineWidth = size * 4;
+      } else {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.strokeStyle = color;
+        ctx.lineWidth = size;
+      }
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(lastPos.current.x, lastPos.current.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      ctx.restore();
+      lastPos.current = p;
+      currentPoints.current.push(p);
+    } else {
+      if (snapshotRef.current) {
+        ctx.putImageData(snapshotRef.current, 0, 0);
+      }
+      drawShapeOnCtx(
+        ctx,
+        tool,
+        color,
+        size,
+        startPos.current.x,
+        startPos.current.y,
+        p.x,
+        p.y
+      );
     }
   }
 
-  function onUp() {
+  function onUp(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (!drawing.current) return;
     drawing.current = false;
+    try {
+      (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+    } catch { }
+
     const ctx = getCtx();
-    ctx.globalCompositeOperation = "source-over";
-    ctx.beginPath();
+    if (ctx) {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.beginPath();
+    }
+
+    if (!roomId) return;
+
+    const opId = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+
+    sentOpIdsRef.current.add(opId);
+    if (sentOpIdsRef.current.size > 200) {
+      const first = sentOpIdsRef.current.values().next().value;
+      if (first) sentOpIdsRef.current.delete(first);
+    }
+
+    if (tool === "pen" || tool === "eraser") {
+      if (currentPoints.current.length > 0) {
+        publishOperation({
+          id: opId,
+          roomId,
+          senderUserId: currentUserId,
+          senderRole: userRole,
+          type: "STROKE",
+          tool,
+          color,
+          size,
+          points: currentPoints.current,
+        });
+      }
+    } else if (tool === "line" || tool === "rect" || tool === "circle") {
+      const s = startPos.current;
+      const ePos = currentEndPos.current;
+      if (s.x !== ePos.x || s.y !== ePos.y) {
+        publishOperation({
+          id: opId,
+          roomId,
+          senderUserId: currentUserId,
+          senderRole: userRole,
+          type: "SHAPE",
+          tool,
+          color,
+          size,
+          startX: s.x,
+          startY: s.y,
+          endX: ePos.x,
+          endY: ePos.y,
+        });
+      }
+    }
+    currentPoints.current = [];
   }
 
   const toolBtns: { id: DrawTool; icon: React.ReactNode; label: string }[] = [
@@ -522,22 +925,282 @@ function Whiteboard({ onClose }: { onClose: () => void }) {
         </button>
       </div>
 
-      {/* Canvas */}
+      {/* Canvas Area */}
       <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
-        {/* Grid background */}
-        <div style={{ position: "absolute", inset: 0, opacity: 0.25 }}
+        {/* Grid background (strictly non-interactive behind canvas) */}
+        <div
+          style={{ position: "absolute", inset: 0, opacity: 0.25, pointerEvents: "none", zIndex: 1 }}
           dangerouslySetInnerHTML={{ __html: `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%"><defs><pattern id="wbgrid" width="28" height="28" patternUnits="userSpaceOnUse"><path d="M 28 0 L 0 0 0 28" fill="none" stroke="#334155" stroke-width="0.5"/></pattern></defs><rect width="100%" height="100%" fill="url(#wbgrid)"/></svg>` }}
         />
         <canvas
           ref={canvasRef}
-          width={1400} height={700}
-          style={{ width: "100%", height: "100%", cursor: tool === "eraser" ? "cell" : "crosshair", display: "block" }}
-          onMouseDown={onDown}
-          onMouseMove={onMove}
-          onMouseUp={onUp}
-          onMouseLeave={onUp}
+          width={1400}
+          height={700}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            cursor: tool === "eraser" ? "cell" : "crosshair",
+            display: "block",
+            touchAction: "none",
+            zIndex: 2,
+          }}
+          onPointerDown={onDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerCancel={onUp}
         />
       </div>
+    </div>
+  );
+}
+
+/* ─── Web Audio Activity Detection Hook ─── */
+interface AudioActivityState {
+  isSpeaking: boolean;
+  level: number;
+}
+
+function useAudioActivity(stream: MediaStream | null, enabled: boolean = true): AudioActivityState {
+  const [activity, setActivity] = useState<AudioActivityState>({ isSpeaking: false, level: 0 });
+
+  useEffect(() => {
+    if (!stream || !enabled) {
+      setActivity({ isSpeaking: false, level: 0 });
+      return;
+    }
+
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      setActivity({ isSpeaking: false, level: 0 });
+      return;
+    }
+
+    const audioTrack = audioTracks[0];
+    if (!audioTrack.enabled || audioTrack.readyState === "ended") {
+      setActivity({ isSpeaking: false, level: 0 });
+      return;
+    }
+
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) {
+      return;
+    }
+
+    let audioCtx: AudioContext | null = null;
+    let sourceNode: MediaStreamAudioSourceNode | null = null;
+    let analyser: AnalyserNode | null = null;
+    let animFrameId: number | null = null;
+    let isMounted = true;
+    let holdUntil = 0;
+    let currentSpeaking = false;
+    let lastLevel = 0;
+    let lastUpdate = 0;
+    let lastDispatchedSpeaking = false;
+    let lastDispatchedLevel = 0;
+
+    try {
+      audioCtx = new AudioContextClass();
+      sourceNode = audioCtx.createMediaStreamSource(stream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.4;
+      sourceNode.connect(analyser);
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const ON_THRESHOLD = 0.038;
+      const OFF_THRESHOLD = 0.022;
+      const HOLD_DELAY_MS = 380;
+
+      const checkAudio = () => {
+        if (!isMounted) return;
+
+        const tracks = stream.getAudioTracks();
+        if (tracks.length === 0 || !tracks[0].enabled || tracks[0].muted || tracks[0].readyState === "ended") {
+          if (lastDispatchedSpeaking || lastDispatchedLevel > 0) {
+            currentSpeaking = false;
+            lastLevel = 0;
+            lastDispatchedSpeaking = false;
+            lastDispatchedLevel = 0;
+            setActivity({ isSpeaking: false, level: 0 });
+          }
+          animFrameId = requestAnimationFrame(checkAudio);
+          return;
+        }
+
+        if (audioCtx && audioCtx.state === "suspended") {
+          audioCtx.resume().catch(() => { });
+        }
+
+        analyser!.getByteTimeDomainData(dataArray);
+
+        let sumSquares = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          const norm = (dataArray[i] - 128) / 128;
+          sumSquares += norm * norm;
+        }
+        const rms = Math.sqrt(sumSquares / bufferLength);
+
+        const rawLevel = Math.min(1, Math.max(0, (rms - OFF_THRESHOLD) / 0.18));
+        const targetLevel = (lastLevel * 0.6) + (rawLevel * 0.4);
+
+        const now = performance.now();
+
+        if (rms >= ON_THRESHOLD) {
+          currentSpeaking = true;
+          holdUntil = now + HOLD_DELAY_MS;
+        } else if (now >= holdUntil && rms < OFF_THRESHOLD) {
+          currentSpeaking = false;
+        }
+
+        const nextSpeaking = currentSpeaking;
+        const nextLevel = nextSpeaking ? Math.round(targetLevel * 100) / 100 : 0;
+        const speakingChanged = lastDispatchedSpeaking !== nextSpeaking;
+        const levelChanged = nextSpeaking && (Math.abs(nextLevel - lastDispatchedLevel) >= 0.03 || now - lastUpdate >= 45);
+
+        if (speakingChanged || levelChanged) {
+          lastUpdate = now;
+          lastLevel = targetLevel;
+          lastDispatchedSpeaking = nextSpeaking;
+          lastDispatchedLevel = nextLevel;
+          setActivity({
+            isSpeaking: nextSpeaking,
+            level: nextLevel,
+          });
+        }
+
+        animFrameId = requestAnimationFrame(checkAudio);
+      };
+
+      animFrameId = requestAnimationFrame(checkAudio);
+    } catch (err) {
+      console.warn("Audio activity detection initialization warning:", err);
+    }
+
+    return () => {
+      isMounted = false;
+      if (animFrameId !== null) {
+        cancelAnimationFrame(animFrameId);
+      }
+      try {
+        sourceNode?.disconnect();
+      } catch { }
+      try {
+        analyser?.disconnect();
+      } catch { }
+      try {
+        if (audioCtx && audioCtx.state !== "closed") {
+          audioCtx.close().catch(() => { });
+        }
+      } catch { }
+      setActivity({ isSpeaking: false, level: 0 });
+    };
+  }, [stream, enabled]);
+
+  return activity;
+}
+
+/* ─── Control Button ─── */
+function CtrlBtn({
+  icon,
+  label,
+  active,
+  danger,
+  onClick,
+  title,
+  ariaLabel,
+  badge,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  active?: boolean;
+  danger?: boolean;
+  onClick?: () => void;
+  title?: string;
+  ariaLabel?: string;
+  badge?: number | string;
+}) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      title={title || label}
+      aria-label={ariaLabel || label}
+      aria-pressed={active}
+      style={{
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+        padding: "7px 10px", borderRadius: 12, cursor: "pointer", border: "none",
+        fontFamily: INTER, transition: "all 0.15s", minWidth: 56,
+        background: danger
+          ? (hov ? `${C.rose}30` : `${C.rose}15`)
+          : active
+            ? (hov ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.11)")
+            : (hov ? "rgba(255,255,255,0.09)" : "rgba(255,255,255,0.04)"),
+        color: danger ? C.rose : active ? C.tp : C.ts,
+        position: "relative",
+      }}
+    >
+      <div style={{
+        width: 38, height: 38, borderRadius: 11, display: "flex", alignItems: "center", justifyContent: "center",
+        background: danger ? `${C.rose}20` : active ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)",
+        border: `1px solid ${danger ? C.rose + "40" : "rgba(255,255,255,0.07)"}`,
+        pointerEvents: "none",
+        position: "relative",
+      }}>
+        {icon}
+        {badge !== undefined && (
+          <span style={{
+            position: "absolute",
+            top: -4,
+            right: -6,
+            background: C.blue,
+            color: "#fff",
+            borderRadius: 10,
+            padding: "1px 5px",
+            fontSize: 9,
+            fontWeight: 700,
+            fontFamily: MONO,
+            boxShadow: "0 2px 5px rgba(0,0,0,0.4)",
+            lineHeight: "12px",
+          }}>
+            {badge}
+          </span>
+        )}
+      </div>
+      <span style={{ fontSize: 9, fontWeight: 500, pointerEvents: "none" }}>{label}</span>
+    </button>
+  );
+}
+
+/* ─── Speaking Wave Indicator ─── */
+function SpeakWave({ active, level = 0 }: { active: boolean; level?: number }) {
+  if (!active) return null;
+  const clampedLevel = Math.min(1, Math.max(0, level));
+  const factors = [0.35, 0.7, 0.5, 1.0, 0.65, 0.85, 0.4];
+
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 14, pointerEvents: "none" }}>
+      {factors.map((factor, i) => {
+        const h = Math.round(3 + factor * clampedLevel * 11);
+        return (
+          <div
+            key={i}
+            style={{
+              width: 2,
+              borderRadius: 2,
+              background: C.emerald,
+              height: h,
+              transition: "height 0.08s ease-out",
+              pointerEvents: "none",
+            }}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -547,7 +1210,9 @@ function VideoPanel({
   mic, cam, screen, handRaised, blurred, showParticipants,
   onMic, onCam, onScreen, onHand, onBlur, onFullscreen, onParticipants, onWhiteboard, whiteboardActive,
   screenStream, localStream, remoteStream, mediaError,
-  isCandidate = false, userName, onLeave,
+  isCandidate = false, userName, onLeave, raisedHands,
+  onSpeakingChange,
+  participants = [],
 }: {
   mic: boolean; cam: boolean; screen: boolean; handRaised: boolean; blurred: boolean; showParticipants: boolean; whiteboardActive: boolean;
   onMic: () => void; onCam: () => void; onScreen: () => void; onHand: () => void; onBlur: () => void;
@@ -559,16 +1224,135 @@ function VideoPanel({
   isCandidate?: boolean;
   userName?: string;
   onLeave?: () => void;
+  raisedHands?: { candidate: boolean; interviewer: boolean };
+  onSpeakingChange?: (states: { candidate: boolean; interviewer: boolean }) => void;
+  participants?: RoomParticipant[];
 }) {
+  const screenAreaRef = useRef<HTMLDivElement>(null);
+  const selfTileRef = useRef<HTMLDivElement>(null);
+  const remoteTileRef = useRef<HTMLDivElement>(null);
   const screenVideoRef = useRef<HTMLVideoElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  const [speaking, setSpeaking] = useState(0);
+  const [fullscreenElement, setFullscreenElement] = useState<Element | null>(null);
+  const [isRemoteScreen, setIsRemoteScreen] = useState(false);
+  const [remoteFitMode, setRemoteFitMode] = useState<"contain" | "cover" | null>(null);
+
+  const localAudio = useAudioActivity(localStream ?? null, mic);
+  const remoteAudio = useAudioActivity(remoteStream ?? null, true);
+
+  const candidateAudio = isCandidate ? localAudio : remoteAudio;
+  const interviewerAudio = isCandidate ? remoteAudio : localAudio;
+
+  const selfParticipant = participants.find(p => p.isSelf);
+  const remoteParticipant = participants.find(p => !p.isSelf);
+
+  const localRole = isCandidate ? "Candidate" : "Interviewer";
+  const remoteRole = isCandidate ? "Interviewer" : "Candidate";
+
+  const localName = selfParticipant?.name || (userName ? userName : localRole);
+  const localIni = selfParticipant?.ini || getInitials(localName, isCandidate ? "CA" : "IN");
+  const localColor = selfParticipant?.color || (isCandidate ? "#7C3AED" : "#1D4ED8");
+
+  const remoteName = remoteParticipant
+    ? remoteParticipant.name
+    : `Waiting for ${remoteRole}...`;
+  const remoteIni = remoteParticipant
+    ? remoteParticipant.ini
+    : (isCandidate ? "IN" : "CA");
+  const remoteColor = remoteParticipant
+    ? remoteParticipant.color
+    : (isCandidate ? "#1D4ED8" : "#7C3AED");
+  const remoteSub = remoteParticipant
+    ? remoteParticipant.role
+    : remoteRole;
+
+  const prevSpeakingRef = useRef({ candidate: false, interviewer: false });
+  useEffect(() => {
+    const prev = prevSpeakingRef.current;
+    if (prev.candidate !== candidateAudio.isSpeaking || prev.interviewer !== interviewerAudio.isSpeaking) {
+      prevSpeakingRef.current = {
+        candidate: candidateAudio.isSpeaking,
+        interviewer: interviewerAudio.isSpeaking,
+      };
+      onSpeakingChange?.({
+        candidate: candidateAudio.isSpeaking,
+        interviewer: interviewerAudio.isSpeaking,
+      });
+    }
+  }, [candidateAudio.isSpeaking, interviewerAudio.isSpeaking, onSpeakingChange]);
 
   useEffect(() => {
-    const id = setInterval(() => setSpeaking(Math.random() > 0.6 ? (Math.random() > 0.5 ? 0 : 1) : speaking), 2200);
-    return () => clearInterval(id);
-  }, [speaking]);
+    const handler = () => {
+      setFullscreenElement(document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+
+  const toggleTileFullscreen = async (el: HTMLElement | null) => {
+    if (!el) return;
+    try {
+      if (document.fullscreenElement === el) {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        }
+      } else {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        }
+        if (el.requestFullscreen) {
+          await el.requestFullscreen();
+        }
+      }
+    } catch (err) {
+      console.warn("Fullscreen toggle failed:", err);
+    }
+  };
+
+  const updateRemoteStreamType = useCallback(() => {
+    const video = remoteVideoRef.current;
+    if (!video || !remoteStream) {
+      setIsRemoteScreen(false);
+      return;
+    }
+    const { videoWidth, videoHeight } = video;
+    if (videoWidth > 0 && videoHeight > 0) {
+      const track = remoteStream.getVideoTracks()[0];
+      const settings = track?.getSettings ? track.getSettings() : undefined;
+      const displaySurface = (settings as Record<string, unknown> | undefined)?.displaySurface;
+      const label = track?.label?.toLowerCase() || "";
+
+      // Screen capture produces high-res widescreen resolutions (e.g. 1920x1080, 2560x1440, 1366x768, 1440x900, 1536x864, 1680x1050),
+      // whereas standard camera stream in Chrome defaults to 640x480 (4:3).
+      const isScreenTrack = Boolean(
+        displaySurface ||
+        label.includes("screen") ||
+        label.includes("window") ||
+        label.includes("display") ||
+        videoWidth > 1280 ||
+        (videoWidth >= 1280 && videoWidth / videoHeight >= 1.5)
+      );
+      setIsRemoteScreen(isScreenTrack);
+    }
+  }, [remoteStream]);
+
+  useEffect(() => {
+    updateRemoteStreamType();
+  }, [remoteStream, updateRemoteStreamType]);
+
+  useEffect(() => {
+    const video = remoteVideoRef.current;
+    if (!video) return;
+    video.addEventListener("resize", updateRemoteStreamType);
+    video.addEventListener("loadedmetadata", updateRemoteStreamType);
+    return () => {
+      video.removeEventListener("resize", updateRemoteStreamType);
+      video.removeEventListener("loadedmetadata", updateRemoteStreamType);
+    };
+  }, [updateRemoteStreamType]);
+
+  const effectiveRemoteFit = remoteFitMode ?? (isRemoteScreen ? "contain" : "cover");
 
   useEffect(() => {
     if (screenVideoRef.current && screenStream) {
@@ -591,48 +1375,19 @@ function VideoPanel({
     }
   }, [remoteStream, screen]);
 
-  function CtrlBtn({ icon, label, active, danger, onClick }: { icon: React.ReactNode; label: string; active?: boolean; danger?: boolean; onClick: () => void }) {
-    const [hov, setHov] = useState(false);
-    return (
-      <button
-        onClick={onClick}
-        onMouseEnter={() => setHov(true)}
-        onMouseLeave={() => setHov(false)}
-        title={label}
-        style={{
-          display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-          padding: "7px 10px", borderRadius: 12, cursor: "pointer", border: "none",
-          fontFamily: INTER, transition: "all 0.15s", minWidth: 56,
-          background: danger
-            ? (hov ? `${C.rose}30` : `${C.rose}15`)
-            : active
-              ? (hov ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.11)")
-              : (hov ? "rgba(255,255,255,0.09)" : "rgba(255,255,255,0.04)"),
-          color: danger ? C.rose : active ? C.tp : C.ts,
-        }}
-      >
-        <div style={{
-          width: 38, height: 38, borderRadius: 11, display: "flex", alignItems: "center", justifyContent: "center",
-          background: danger ? `${C.rose}20` : active ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)",
-          border: `1px solid ${danger ? C.rose + "40" : "rgba(255,255,255,0.07)"}`,
-        }}>{icon}</div>
-        <span style={{ fontSize: 9, fontWeight: 500 }}>{label}</span>
-      </button>
-    );
-  }
-
-  const SpeakWave = ({ on }: { on: boolean }) => on ? (
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 14 }}>
-      {[3, 6, 4, 8, 5, 7, 3].map((h, i) => (
-        <div key={i} style={{ width: 2, borderRadius: 2, background: C.emerald, height: h, animation: `waveBar 0.55s ease-in-out ${i * 0.09}s infinite alternate` }} />
-      ))}
-    </div>
-  ) : null;
-
   return (
     <div style={{ position: "relative", height: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
       {/* Main video area */}
-      <div style={{ flex: 1, borderRadius: 18, overflow: "hidden", position: "relative", background: "#070d18" }}>
+      <div
+        ref={screen && screenStream ? screenAreaRef : undefined}
+        style={{
+          flex: 1,
+          borderRadius: fullscreenElement === screenAreaRef.current ? 0 : 18,
+          overflow: "hidden",
+          position: "relative",
+          background: "#070d18",
+        }}
+      >
         {mediaError && (
           <div style={{ position: "absolute", top: 12, left: 12, right: 12, zIndex: 20, background: "rgba(244,63,94,0.9)", color: "#fff", padding: "8px 12px", borderRadius: 8, fontSize: 12, fontFamily: INTER }}>
             {mediaError}
@@ -647,18 +1402,56 @@ function VideoPanel({
               muted
               style={{ width: "100%", height: "100%", objectFit: "contain", background: "#000" }}
             />
-            <div style={{ position: "absolute", top: 12, left: 12 }}>
+            <div style={{ position: "absolute", top: 12, left: 12, zIndex: 10 }}>
               <span style={{ background: `${C.blue}22`, border: `1px solid ${C.blue}40`, borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 600, color: C.blue, fontFamily: INTER }}>
                 ● Screen Sharing
               </span>
             </div>
+            {/* Screen share tile fullscreen control */}
+            <div style={{ position: "absolute", top: 12, right: 12, zIndex: 15 }}>
+              <button
+                onClick={() => toggleTileFullscreen(screenAreaRef.current)}
+                title={fullscreenElement === screenAreaRef.current ? "Exit fullscreen" : "Enter fullscreen"}
+                aria-label={fullscreenElement === screenAreaRef.current ? "Exit fullscreen" : "Enter fullscreen"}
+                style={{
+                  width: 32, height: 32, borderRadius: 9,
+                  background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  cursor: "pointer", color: "#fff", transition: "all 0.15s",
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.2)")}
+                onMouseLeave={e => (e.currentTarget.style.background = "rgba(0,0,0,0.6)")}
+              >
+                {fullscreenElement === screenAreaRef.current ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+              </button>
+            </div>
             {/* Floating pip thumbnails */}
             <div style={{ position: "absolute", bottom: 14, right: 14, display: "flex", flexDirection: "column", gap: 8, zIndex: 10 }}>
               {[
-                { name: isCandidate ? "You" : "Priya Nair", ini: "PN", color: "#7C3AED", active: speaking === 0 },
-                { name: !isCandidate ? "You" : "Sarah Lin", ini: "SL", color: "#1D4ED8", active: speaking === 1 },
+                {
+                  id: "self",
+                  name: "You",
+                  ini: localIni,
+                  color: localColor,
+                  active: isCandidate ? candidateAudio.isSpeaking : interviewerAudio.isSpeaking,
+                  audioLevel: isCandidate ? candidateAudio.level : interviewerAudio.level,
+                  handRaised: Boolean(raisedHands ? raisedHands[isCandidate ? "candidate" : "interviewer"] : handRaised),
+                },
+                {
+                  id: "remote",
+                  name: remoteParticipant ? remoteParticipant.name : remoteRole,
+                  ini: remoteIni,
+                  color: remoteColor,
+                  active: !isCandidate ? candidateAudio.isSpeaking : interviewerAudio.isSpeaking,
+                  audioLevel: !isCandidate ? candidateAudio.level : interviewerAudio.level,
+                  handRaised: Boolean(
+                    remoteParticipant?.handRaised ||
+                    (raisedHands ? raisedHands[!isCandidate ? "candidate" : "interviewer"] : false)
+                  ),
+                },
               ].map(p => (
-                <div key={p.name} style={{
+                <div key={p.id} style={{
                   width: 112, height: 74, borderRadius: 11, background: C.elevated,
                   border: `2px solid ${p.active ? C.emerald : "rgba(255,255,255,0.08)"}`,
                   position: "relative", overflow: "hidden",
@@ -666,9 +1459,26 @@ function VideoPanel({
                   transition: "border-color 0.3s", display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
                   <div style={{ width: 30, height: 30, borderRadius: "50%", background: p.color, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 10, fontWeight: 700 }}>{p.ini}</div>
-                  <div style={{ position: "absolute", bottom: 4, left: 6, display: "flex", alignItems: "center", gap: 3 }}>
+                  <div style={{ position: "absolute", bottom: 4, left: 6, display: "flex", alignItems: "center", gap: 3, pointerEvents: "none" }}>
+                    {p.handRaised && (
+                      <span
+                        title="Hand raised"
+                        aria-label="Hand raised"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          background: "rgba(245, 158, 11, 0.25)",
+                          border: "1px solid rgba(245, 158, 11, 0.5)",
+                          borderRadius: 3,
+                          padding: "1px",
+                        }}
+                      >
+                        <Hand size={9} color={C.amber} />
+                      </span>
+                    )}
                     <span style={{ color: "#fff", fontSize: 8, fontWeight: 600, background: "rgba(0,0,0,0.55)", borderRadius: 4, padding: "1px 4px" }}>{p.name}</span>
-                    <SpeakWave on={p.active} />
+                    <SpeakWave active={p.active} level={p.audioLevel} />
                   </div>
                 </div>
               ))}
@@ -678,91 +1488,252 @@ function VideoPanel({
           /* Normal video grid */
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", height: "100%", gap: 8, padding: 8 }}>
             {[
-              { name: isCandidate && userName ? `${userName} (You)` : (isCandidate ? "Priya Nair (You)" : "Priya Nair"), ini: "PN", color: "#7C3AED", sub: "Candidate", isSelf: !!isCandidate, active: speaking === 0 },
-              { name: !isCandidate && userName ? `${userName} (You)` : (!isCandidate ? "Sarah Lin (You)" : "Sarah Lin"), ini: "SL", color: "#1D4ED8", sub: "Interviewer", isSelf: !isCandidate, active: speaking === 1 },
-            ].map(p => (
-              <div key={p.name} style={{
-                borderRadius: 14, background: C.elevated,
-                border: `2px solid ${p.active ? C.emerald : "rgba(255,255,255,0.06)"}`,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                position: "relative", overflow: "hidden",
-                boxShadow: p.active ? `0 0 20px ${C.emerald}30` : "none",
-                transition: "border-color 0.3s,box-shadow 0.3s",
-              }}>
-                {p.isSelf && cam && localStream && localStream.getVideoTracks().length > 0 ? (
-                  <video
-                    ref={localVideoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    style={{
-                      width: "100%", height: "100%", objectFit: "cover", transform: "scaleX(-1)",
-                      filter: blurred ? "blur(4px)" : "none", transition: "filter 0.3s",
-                    }}
-                  />
-                ) : !p.isSelf && remoteStream ? (
-                  <>
+              {
+                id: "self",
+                name: `${localName} (You)`,
+                ini: localIni,
+                color: localColor,
+                sub: localRole,
+                isSelf: true,
+                active: isCandidate ? candidateAudio.isSpeaking : interviewerAudio.isSpeaking,
+                audioLevel: isCandidate ? candidateAudio.level : interviewerAudio.level,
+                handRaised: Boolean(raisedHands ? raisedHands[isCandidate ? "candidate" : "interviewer"] : handRaised),
+              },
+              {
+                id: "remote",
+                name: remoteName,
+                ini: remoteIni,
+                color: remoteColor,
+                sub: remoteSub,
+                isSelf: false,
+                active: !isCandidate ? candidateAudio.isSpeaking : interviewerAudio.isSpeaking,
+                audioLevel: !isCandidate ? candidateAudio.level : interviewerAudio.level,
+                handRaised: Boolean(
+                  remoteParticipant?.handRaised ||
+                  (raisedHands ? raisedHands[!isCandidate ? "candidate" : "interviewer"] : false)
+                ),
+              },
+            ].map(p => {
+              const tileRef = p.isSelf ? selfTileRef : remoteTileRef;
+              const isThisFullscreen = fullscreenElement === tileRef.current;
+
+              return (
+                <div
+                  key={p.id}
+                  ref={tileRef}
+                  style={{
+                    borderRadius: isThisFullscreen ? 0 : 14,
+                    background: isThisFullscreen ? "#070d18" : C.elevated,
+                    border: isThisFullscreen ? "none" : `2px solid ${p.active ? C.emerald : "rgba(255,255,255,0.06)"}`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    position: "relative",
+                    overflow: "hidden",
+                    boxShadow: p.active && !isThisFullscreen ? `0 0 20px ${C.emerald}30` : "none",
+                    transition: "border-color 0.3s,box-shadow 0.3s",
+                    width: "100%",
+                    height: "100%",
+                  }}
+                >
+                  {p.isSelf && cam && localStream && localStream.getVideoTracks().length > 0 ? (
                     <video
-                      ref={remoteVideoRef}
+                      ref={localVideoRef}
                       autoPlay
                       playsInline
+                      muted
                       style={{
-                        width: "100%", height: "100%", objectFit: "cover",
-                        display: remoteStream.getVideoTracks().length > 0 ? "block" : "none",
+                        width: "100%",
+                        height: "100%",
+                        objectFit: isThisFullscreen ? "contain" : "cover",
+                        transform: "scaleX(-1)",
+                        filter: blurred ? "blur(4px)" : "none",
+                        transition: "filter 0.3s",
+                        background: isThisFullscreen ? "#000" : "transparent",
                       }}
                     />
-                    {remoteStream.getVideoTracks().length === 0 && (
-                      <div style={{
-                        width: 64, height: 64, borderRadius: "50%",
-                        background: `linear-gradient(135deg,${p.color},${p.color}88)`,
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        color: "#fff", fontSize: 20, fontWeight: 700, fontFamily: INTER,
-                        boxShadow: `0 8px 28px ${p.color}50`,
-                      }}>{p.ini}</div>
+                  ) : !p.isSelf && remoteStream ? (
+                    <>
+                      <video
+                        ref={remoteVideoRef}
+                        autoPlay
+                        playsInline
+                        onLoadedMetadata={updateRemoteStreamType}
+                        onResize={updateRemoteStreamType}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: isThisFullscreen ? "contain" : effectiveRemoteFit,
+                          objectPosition: "center",
+                          background: (isThisFullscreen || effectiveRemoteFit === "contain") ? "#000" : "transparent",
+                          display: remoteStream.getVideoTracks().length > 0 ? "block" : "none",
+                        }}
+                      />
+                      {remoteStream.getVideoTracks().length === 0 && (
+                        <div style={{
+                          width: 64, height: 64, borderRadius: "50%",
+                          background: `linear-gradient(135deg,${p.color},${p.color}88)`,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          color: "#fff", fontSize: 20, fontWeight: 700, fontFamily: INTER,
+                          boxShadow: `0 8px 28px ${p.color}50`,
+                        }}>{p.ini}</div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{
+                      width: 64, height: 64, borderRadius: "50%",
+                      background: `linear-gradient(135deg,${p.color},${p.color}88)`,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      color: "#fff", fontSize: 20, fontWeight: 700, fontFamily: INTER,
+                      boxShadow: `0 8px 28px ${p.color}50`,
+                      filter: blurred && p.isSelf ? "blur(4px)" : "none",
+                      transition: "filter 0.3s",
+                    }}>{p.ini}</div>
+                  )}
+
+                  {/* Remote screen sharing badge */}
+                  {!p.isSelf && isRemoteScreen && (
+                    <div style={{ position: "absolute", top: 10, left: 10, zIndex: 10 }}>
+                      <span style={{
+                        background: `${C.blue}22`,
+                        border: `1px solid ${C.blue}40`,
+                        borderRadius: 20,
+                        padding: "2px 8px",
+                        fontSize: 10,
+                        fontWeight: 600,
+                        color: C.blue,
+                        fontFamily: INTER,
+                      }}>
+                        ● Screen Sharing
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Top-right tile controls */}
+                  <div style={{ position: "absolute", top: 10, right: 10, display: "flex", alignItems: "center", gap: 6, zIndex: 15 }}>
+                    {blurred && p.isSelf && (
+                      <span style={{ background: `${C.blue}22`, border: `1px solid ${C.blue}40`, borderRadius: 8, padding: "2px 7px", fontSize: 9, color: C.blue, fontWeight: 600, fontFamily: INTER }}>
+                        Blur ON
+                      </span>
                     )}
-                  </>
-                ) : (
-                  <div style={{
-                    width: 64, height: 64, borderRadius: "50%",
-                    background: `linear-gradient(135deg,${p.color},${p.color}88)`,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    color: "#fff", fontSize: 20, fontWeight: 700, fontFamily: INTER,
-                    boxShadow: `0 8px 28px ${p.color}50`,
-                    filter: blurred && p.isSelf ? "blur(4px)" : "none",
-                    transition: "filter 0.3s",
-                  }}>{p.ini}</div>
-                )}
 
-                {blurred && p.isSelf && (
-                  <div style={{ position: "absolute", top: 8, right: 8 }}>
-                    <span style={{ background: `${C.blue}22`, border: `1px solid ${C.blue}40`, borderRadius: 8, padding: "2px 7px", fontSize: 9, color: C.blue, fontWeight: 600, fontFamily: INTER }}>Blur ON</span>
+                    {/* Remote fit toggle: allows user to switch between contain (preserve full screen) and cover (fill tile) */}
+                    {!p.isSelf && remoteStream && remoteStream.getVideoTracks().length > 0 && (
+                      <button
+                        onClick={() => setRemoteFitMode(m => (m ?? (isRemoteScreen ? "contain" : "cover")) === "contain" ? "cover" : "contain")}
+                        title={effectiveRemoteFit === "contain" ? "Fill tile (crop edges)" : "Fit to tile (show full screen)"}
+                        aria-label={effectiveRemoteFit === "contain" ? "Fill tile" : "Fit to tile"}
+                        style={{
+                          height: 26,
+                          padding: "0 8px",
+                          borderRadius: 7,
+                          background: "rgba(0,0,0,0.6)",
+                          backdropFilter: "blur(8px)",
+                          border: "1px solid rgba(255,255,255,0.12)",
+                          display: "flex",
+                          alignItems: "center",
+                          cursor: "pointer",
+                          color: effectiveRemoteFit === "contain" ? C.blue : "#fff",
+                          fontSize: 10,
+                          fontWeight: 500,
+                          fontFamily: INTER,
+                          transition: "all 0.15s",
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.18)")}
+                        onMouseLeave={e => (e.currentTarget.style.background = "rgba(0,0,0,0.6)")}
+                      >
+                        {effectiveRemoteFit === "contain" ? "Fit" : "Fill"}
+                      </button>
+                    )}
+
+                    {/* Individual tile fullscreen control */}
+                    <button
+                      onClick={() => toggleTileFullscreen(tileRef.current)}
+                      title={isThisFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                      aria-label={isThisFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                      style={{
+                        width: 26,
+                        height: 26,
+                        borderRadius: 7,
+                        background: "rgba(0,0,0,0.6)",
+                        backdropFilter: "blur(8px)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        color: "#fff",
+                        transition: "all 0.15s",
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.18)")}
+                      onMouseLeave={e => (e.currentTarget.style.background = "rgba(0,0,0,0.6)")}
+                    >
+                      {isThisFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                    </button>
+
+                    {p.active && <div style={{ width: 7, height: 7, borderRadius: "50%", background: C.emerald, boxShadow: `0 0 8px ${C.emerald}` }} />}
                   </div>
-                )}
 
-                <div style={{ position: "absolute", bottom: 10, left: 10, display: "flex", alignItems: "center", gap: 7 }}>
-                  <div style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(6px)", borderRadius: 7, padding: "3px 8px", display: "flex", alignItems: "center", gap: 5 }}>
-                    {p.active && <SpeakWave on />}
-                    <span style={{ color: "#fff", fontSize: 10, fontWeight: 600, fontFamily: INTER }}>{p.name}</span>
-                    <span style={{ color: C.tm, fontSize: 9, fontFamily: INTER }}>· {p.sub}</span>
+                  {/* Participant overlay information */}
+                  <div style={{ position: "absolute", bottom: 10, left: 10, display: "flex", alignItems: "center", gap: 7, zIndex: 10, pointerEvents: "none" }}>
+                    <div style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(6px)", borderRadius: 7, padding: "3px 8px", display: "flex", alignItems: "center", gap: 5 }}>
+                      {p.handRaised && (
+                        <span
+                          title={`${p.name}'s hand is raised`}
+                          aria-label="Hand raised"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            background: "rgba(245, 158, 11, 0.25)",
+                            border: "1px solid rgba(245, 158, 11, 0.5)",
+                            borderRadius: 4,
+                            padding: "2px 4px",
+                            marginRight: 2,
+                            boxShadow: "0 0 6px rgba(245, 158, 11, 0.3)",
+                          }}
+                        >
+                          <Hand size={11} color={C.amber} />
+                        </span>
+                      )}
+                      <span style={{ color: "#fff", fontSize: 10, fontWeight: 600, fontFamily: INTER }}>{p.name}</span>
+                      <span style={{ color: C.tm, fontSize: 9, fontFamily: INTER }}>· {p.sub}</span>
+                      <SpeakWave active={p.active} level={p.audioLevel} />
+                    </div>
                   </div>
                 </div>
-                {p.active && <div style={{ position: "absolute", top: 9, right: 9, width: 7, height: 7, borderRadius: "50%", background: C.emerald, boxShadow: `0 0 8px ${C.emerald}` }} />}
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
 
       {/* Floating control bar */}
-      <GlassCard style={{ padding: "7px 14px", display: "flex", alignItems: "center", justifyContent: "center", gap: 2, flexShrink: 0 }}>
+      <GlassCard style={{
+        padding: "7px 14px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 2,
+        flexShrink: 0,
+        position: "relative",
+        zIndex: 25,
+      }}>
         <CtrlBtn icon={mic ? <Mic size={16} /> : <MicOff size={16} />} label={mic ? "Mute" : "Unmute"} active={mic} onClick={onMic} />
         <CtrlBtn icon={cam ? <Video size={16} /> : <VideoOff size={16} />} label={cam ? "Camera" : "Start"} active={cam} onClick={onCam} />
         <CtrlBtn icon={screen ? <MonitorOff size={16} /> : <Monitor size={16} />} label="Share Screen" active={screen} onClick={onScreen} />
-        <CtrlBtn icon={<Hand size={16} />} label="Hand" active={handRaised} onClick={onHand} />
+        <CtrlBtn
+          icon={<Hand size={16} />}
+          label={handRaised ? "Lower Hand" : "Raise Hand"}
+          active={handRaised}
+          onClick={onHand}
+          title={handRaised ? "Lower your hand (hand is currently raised)" : "Raise your hand (hand is currently lowered)"}
+          ariaLabel={handRaised ? "Lower hand (currently raised)" : "Raise hand (currently lowered)"}
+        />
         <CtrlBtn icon={<Blend size={16} />} label="Blur BG" active={blurred} onClick={onBlur} />
         <CtrlBtn icon={<PenLine size={16} />} label="Whiteboard" active={whiteboardActive} onClick={onWhiteboard} />
         <div style={{ width: 1, height: 38, background: C.border, margin: "0 4px" }} />
-        <CtrlBtn icon={<Users size={16} />} label="People" active={showParticipants} onClick={onParticipants} />
+        <CtrlBtn icon={<Users size={16} />} label="People" badge={participants.length} active={showParticipants} onClick={onParticipants} />
         <CtrlBtn icon={<Maximize2 size={16} />} label="Fullscreen" onClick={onFullscreen} />
         <div style={{ width: 1, height: 38, background: C.border, margin: "0 4px" }} />
         <button
@@ -872,7 +1843,7 @@ function CodeEditor({
           selectedLangRef.current = normalized;
 
           const nextCodes: Record<SupportedInterviewLanguage, string> = { ...codesRef.current };
-          const raw = snapshot as Record<string, string>;
+          const raw = snapshot as unknown as Record<string, string>;
           if (raw["code_Java"] && raw["code_Java"].trim().length > 0) {
             nextCodes.Java = raw["code_Java"];
           }
@@ -1145,8 +2116,8 @@ function CodeEditor({
           background: active
             ? `${C.blue}25`
             : hov
-            ? "rgba(255,255,255,0.08)"
-            : "transparent",
+              ? "rgba(255,255,255,0.08)"
+              : "transparent",
           color: active ? C.blue : hov ? C.tp : C.ts,
           display: "flex",
           alignItems: "center",
@@ -1321,45 +2292,364 @@ function CodeEditor({
 }
 
 /* ─── Chat ─── */
-type Msg = { id: number; sender: string; ini: string; color: string; text: string; time: string; self: boolean };
+interface ChatMessage {
+  id: string;
+  sender: string;
+  ini: string;
+  color: string;
+  text: string;
+  time: string;
+  self: boolean;
+}
 
-function ChatPanel() {
-  const [msgs, setMsgs] = useState<Msg[]>([
-    { id: 1, sender: "Priya Nair", ini: "PN", color: "#7C3AED", text: "Hi! Ready whenever you are.", time: "14:02", self: false },
-    { id: 2, sender: "You", ini: "SL", color: "#1D4ED8", text: "Great, let's start with Two Sum.", time: "14:02", self: true },
-    { id: 3, sender: "Priya Nair", ini: "PN", color: "#7C3AED", text: "Sure! Should I start brute-force first?", time: "14:03", self: false },
-    { id: 4, sender: "You", ini: "SL", color: "#1D4ED8", text: "Yes, then we'll optimize. Walk me through it.", time: "14:03", self: true },
-  ]);
+interface ChatPanelProps {
+  roomId?: string;
+  stompClientRef?: React.RefObject<Client | null>;
+  isCandidate?: boolean;
+  userRole?: string;
+  currentUserId?: string;
+  currentUserName?: string;
+  isConnected?: boolean;
+  onRegisterRemoteChatHandler?: (handler: ((msg: InterviewChatMessage) => void) | null) => void;
+}
+
+function formatChatTime(rawTime?: string): string {
+  if (!rawTime) {
+    return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+  try {
+    const d = new Date(rawTime);
+    if (isNaN(d.getTime())) {
+      return rawTime;
+    }
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  } catch {
+    return rawTime;
+  }
+}
+
+function ChatPanel({
+  roomId,
+  stompClientRef,
+  isCandidate = false,
+  userRole,
+  currentUserId,
+  currentUserName,
+  isConnected = false,
+  onRegisterRemoteChatHandler,
+}: ChatPanelProps) {
+  // Start with completely empty state (no static / fake messages)
+  const [msgs, setMsgs] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  function send() {
-    const text = input.trim(); if (!text) return;
-    setMsgs(p => [...p, { id: Date.now(), sender: "You", ini: "SL", color: "#1D4ED8", text, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), self: true }]);
-    setInput("");
-  }
+  // Register remote chat handler with the parent STOMP subscription
+  useEffect(() => {
+    if (!onRegisterRemoteChatHandler) return;
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
+    const handleIncomingMessage = (chatMsg: InterviewChatMessage) => {
+      if (!chatMsg || !chatMsg.id || !chatMsg.text) return;
+
+      const currentRole = (userRole || (isCandidate ? "candidate" : "interviewer")).toLowerCase();
+      const isSelf = Boolean(
+        (currentUserId && chatMsg.senderUserId && chatMsg.senderUserId === currentUserId) ||
+        (!currentUserId && chatMsg.senderRole && chatMsg.senderRole.toLowerCase() === currentRole)
+      );
+
+      const senderRoleLower = chatMsg.senderRole?.toLowerCase();
+      const isSenderCandidate = senderRoleLower === "candidate";
+
+      const formattedMsg: ChatMessage = {
+        id: chatMsg.id,
+        sender: isSelf ? (currentUserName || "You") : (chatMsg.senderName || (isSenderCandidate ? "Candidate" : "Interviewer")),
+        ini: getInitials(chatMsg.senderName, isSenderCandidate ? "CA" : "IN"),
+        color: isSenderCandidate ? "#7C3AED" : "#1D4ED8",
+        text: chatMsg.text,
+        time: formatChatTime(chatMsg.timestamp),
+        self: isSelf,
+      };
+
+      setMsgs((prev) => {
+        // Prevent duplicate messages by stable server id
+        if (prev.some((m) => m.id === formattedMsg.id)) {
+          return prev;
+        }
+        return [...prev, formattedMsg];
+      });
+    };
+
+    onRegisterRemoteChatHandler(handleIncomingMessage);
+    return () => {
+      onRegisterRemoteChatHandler(null);
+    };
+  }, [onRegisterRemoteChatHandler, currentUserId, isCandidate, userRole]);
+
+  const canSend = Boolean(input.trim()) && isConnected;
+
+  const handleSendMessage = () => {
+    const text = input.trim();
+    if (!text) return;
+
+    const client = stompClientRef?.current;
+    if (!client || !client.connected || !roomId) {
+      console.warn("STOMP client is not connected. Cannot publish chat message.");
+      return;
+    }
+
+    try {
+      client.publish({
+        destination: `/app/interview/${roomId}/chat`,
+        body: JSON.stringify({
+          roomId,
+          text,
+        }),
+      });
+
+      // Clear input after publishing
+      setInput("");
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+      }
+    } catch (err) {
+      console.error("Failed to publish chat message:", err);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 80)}px`;
+    }
+  };
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", fontFamily: INTER }}>
-      <div style={{ flex: 1, overflowY: "auto", padding: "12px 12px", display: "flex", flexDirection: "column", gap: 12 }}>
-        {msgs.map(m => (
-          <div key={m.id} style={{ display: "flex", flexDirection: m.self ? "row-reverse" : "row", gap: 7, alignItems: "flex-end" }}>
-            <div style={{ width: 26, height: 26, borderRadius: "50%", background: m.color, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9, fontWeight: 700, flexShrink: 0 }}>{m.ini}</div>
-            <div style={{ maxWidth: "75%", display: "flex", flexDirection: "column", gap: 3, alignItems: m.self ? "flex-end" : "flex-start" }}>
-              <div style={{ padding: "8px 12px", borderRadius: m.self ? "14px 14px 4px 14px" : "14px 14px 14px 4px", background: m.self ? `linear-gradient(135deg,${C.blue},#1D4ED8)` : C.elevated, color: C.tp, fontSize: 12, lineHeight: 1.5, boxShadow: m.self ? `0 3px 12px ${C.blue}30` : "none" }}>{m.text}</div>
-              <span style={{ color: C.tm, fontSize: 10 }}>{m.time}</span>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", fontFamily: INTER, overflow: "hidden" }}>
+      {/* Scrollable conversation body */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          padding: "12px 12px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        {msgs.length === 0 ? (
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "40px 20px",
+              textAlign: "center",
+              userSelect: "none",
+            }}
+          >
+            <div
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 12,
+                background: "rgba(255,255,255,0.03)",
+                border: `1px solid ${C.border}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginBottom: 12,
+              }}
+            >
+              <MessageSquare size={20} color={C.ts} />
             </div>
+            <span style={{ color: C.tp, fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+              No messages yet
+            </span>
+            <span style={{ color: C.tm, fontSize: 11, maxWidth: 220, lineHeight: 1.4 }}>
+              Messages exchanged during this interview session will appear here in real time.
+            </span>
           </div>
-        ))}
+        ) : (
+          msgs.map(m => (
+            <div
+              key={m.id}
+              style={{
+                display: "flex",
+                flexDirection: m.self ? "row-reverse" : "row",
+                justifyContent: m.self ? "flex-end" : "flex-start",
+                alignItems: "flex-end",
+                gap: 8,
+                width: "100%",
+              }}
+            >
+              {/* Avatar with initials */}
+              <div
+                title={m.self ? "You" : m.sender}
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: "50%",
+                  background: m.color,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#fff",
+                  fontSize: 9,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                  userSelect: "none",
+                }}
+              >
+                {m.ini}
+              </div>
+
+              {/* Message bubble + sender info */}
+              <div
+                style={{
+                  maxWidth: "75%",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 3,
+                  alignItems: m.self ? "flex-end" : "flex-start",
+                  minWidth: 0,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    color: m.self ? "#60A5FA" : C.ts,
+                    paddingLeft: m.self ? 0 : 2,
+                    paddingRight: m.self ? 2 : 0,
+                    userSelect: "none",
+                  }}
+                >
+                  {m.self ? "You" : m.sender}
+                </span>
+                <div
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: m.self ? "14px 14px 2px 14px" : "14px 14px 14px 2px",
+                    background: m.self
+                      ? "linear-gradient(135deg, #1D4ED8, #2563EB)"
+                      : "#1E293B",
+                    border: m.self
+                      ? "1px solid rgba(59, 130, 246, 0.35)"
+                      : "1px solid rgba(255, 255, 255, 0.08)",
+                    color: m.self ? "#FFFFFF" : C.tp,
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                    boxShadow: m.self
+                      ? "0 2px 8px rgba(29, 78, 216, 0.25)"
+                      : "0 2px 6px rgba(0, 0, 0, 0.25)",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {m.text}
+                </div>
+                <span
+                  style={{
+                    color: C.tm,
+                    fontSize: 10,
+                    paddingLeft: m.self ? 0 : 4,
+                    paddingRight: m.self ? 4 : 0,
+                    userSelect: "none",
+                  }}
+                >
+                  {m.time}
+                </span>
+              </div>
+            </div>
+          ))
+        )}
         <div ref={bottomRef} />
       </div>
-      <div style={{ padding: "9px 12px", borderTop: `1px solid ${C.border}`, background: C.surface, flexShrink: 0 }}>
-        <div style={{ display: "flex", gap: 7, alignItems: "center", background: C.elevated, border: `1px solid ${C.border}`, borderRadius: 11, padding: "5px 7px 5px 12px" }}>
-          <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()} placeholder="Type a message…" style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: C.tp, fontSize: 12, fontFamily: INTER }} />
-          <button onClick={send} style={{ width: 30, height: 30, borderRadius: 8, background: input.trim() ? `linear-gradient(135deg,${C.blue},#1D4ED8)` : "rgba(255,255,255,0.06)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: input.trim() ? `0 3px 10px ${C.blue}40` : "none", transition: "all 0.15s" }}>
-            <Send size={13} color={input.trim() ? "#fff" : C.tm} />
+
+      {/* Input area pinned to bottom */}
+      <div
+        style={{
+          padding: "9px 12px",
+          borderTop: `1px solid ${C.border}`,
+          background: C.surface,
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "flex-end",
+            background: C.elevated,
+            border: `1px solid ${C.border}`,
+            borderRadius: 11,
+            padding: "6px 8px 6px 12px",
+          }}
+        >
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            placeholder={isConnected ? "Type a message… (Enter to send, Shift+Enter for newline)" : "Connecting to chat…"}
+            disabled={!isConnected}
+            rows={1}
+            aria-label="Chat message"
+            style={{
+              flex: 1,
+              background: "transparent",
+              border: "none",
+              outline: "none",
+              color: C.tp,
+              fontSize: 12,
+              lineHeight: "18px",
+              fontFamily: INTER,
+              resize: "none",
+              minHeight: 20,
+              maxHeight: 80,
+              overflowY: "auto",
+              padding: "2px 0",
+              opacity: isConnected ? 1 : 0.6,
+            }}
+          />
+          <button
+            onClick={handleSendMessage}
+            disabled={!canSend}
+            aria-label="Send message"
+            title={!isConnected ? "Chat disconnected" : canSend ? "Send message (Enter)" : "Type a message to send"}
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 8,
+              background: canSend ? `linear-gradient(135deg,${C.blue},#1D4ED8)` : "rgba(255,255,255,0.06)",
+              border: "none",
+              cursor: canSend ? "pointer" : "not-allowed",
+              opacity: canSend ? 1 : 0.45,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: canSend ? `0 3px 10px ${C.blue}40` : "none",
+              transition: "all 0.15s",
+              flexShrink: 0,
+            }}
+          >
+            <Send size={13} color={canSend ? "#fff" : C.tm} />
           </button>
         </div>
       </div>
@@ -1727,7 +3017,7 @@ function ConsolePanel({ executionResult, isExecuting }: ConsolePanelProps) {
                   ? `Execution time: ${formatTime(executionResult.executionTime)}`
                   : ""}
                 {formatTime(executionResult.executionTime) &&
-                formatMemory(executionResult.memory)
+                  formatMemory(executionResult.memory)
                   ? " · "
                   : ""}
                 {formatMemory(executionResult.memory)
@@ -1785,19 +3075,34 @@ export default function InterviewRoom() {
   const [presenceStatus, setPresenceStatus] = useState("Connecting");
   const [presenceMessages, setPresenceMessages] = useState<PresenceMessage[]>([]);
 
-  const userRole = getUserRole();
-  const isCandidate = userRole === "candidate";
-  const user = getUser();
-  const userName = user?.name?.trim();
+  const globalRole = getUserRole();
+  const [currentUser, setCurrentUser] = useState<User | null>(() => getUser());
+  const [roomAuthStatus, setRoomAuthStatus] = useState<"verifying" | "authorized" | "unauthorized" | "not_found" | "error">("verifying");
+  const [roomAuthError, setRoomAuthError] = useState<string | null>(null);
+  const [interviewRecord, setInterviewRecord] = useState<InterviewDetailsResponse | null>(null);
+  const [roomRole, setRoomRole] = useState<"Interviewer" | "Candidate" | "Observer" | null>(null);
+
+  const currentUserId = currentUser?.id || currentUser?._id || currentUser?.userId;
+  const currentUserName = currentUser?.name?.trim();
+  const isCandidate = roomRole ? roomRole === "Candidate" : globalRole === "candidate";
 
   const [mic, setMic] = useState(true);
   const [cam, setCam] = useState(true);
   const [screen, setScreen] = useState(false);
-  const [handRaised, setHandRaised] = useState(false);
+  const [raisedHands, setRaisedHands] = useState<{ candidate: boolean; interviewer: boolean }>({
+    candidate: false,
+    interviewer: false,
+  });
+  const selfRoleKey = isCandidate ? "candidate" : "interviewer";
+  const handRaised = raisedHands[selfRoleKey];
   const [blurred, setBlurred] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [, setIsFullscreen] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
   const [whiteboardActive, setWhiteboardActive] = useState(false);
+  const [speakingStates, setSpeakingStates] = useState<{ candidate: boolean; interviewer: boolean }>({
+    candidate: false,
+    interviewer: false,
+  });
   const [rightTab, setRightTab] = useState<"code" | "chat">("code");
   const [consoleVisible, setConsoleVisible] = useState(true);
   const [shortcutOpen, setShortcutOpen] = useState(false);
@@ -1805,12 +3110,164 @@ export default function InterviewRoom() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
+
+  // Initialize participantsMap empty until room membership is verified
+  const [participantsMap, setParticipantsMap] = useState<Record<string, RoomParticipant>>({});
+  const hasAnnouncedToUserRef = useRef<Set<string>>(new Set());
+
+  // Step 2 & 3: Verify room membership via backend before initializing room participation
+  useEffect(() => {
+    let active = true;
+
+    const verifyMembership = async () => {
+      if (!roomId) {
+        if (active) {
+          setRoomAuthStatus("error");
+          setRoomAuthError("Missing room ID in URL");
+        }
+        return;
+      }
+
+      const token = getToken();
+      if (!token) {
+        if (active) {
+          setRoomAuthStatus("unauthorized");
+          setRoomAuthError("You must be logged in to enter an interview room.");
+        }
+        return;
+      }
+
+      try {
+        let usr = getUser();
+        if (!usr || !usr.id) {
+          usr = await fetchCurrentUser();
+        }
+        if (active && usr) {
+          setCurrentUser(usr);
+        }
+
+        const roomData = await getInterviewRoom(roomId);
+        if (!active) return;
+
+        setInterviewRecord(roomData);
+
+        const uid = usr?.id || usr?.userId;
+        let assignedRole: "Interviewer" | "Candidate" | "Observer" | null = null;
+        if (uid && roomData.interviewerId && uid === roomData.interviewerId) {
+          assignedRole = "Interviewer";
+        } else if (uid && roomData.candidateId && uid === roomData.candidateId) {
+          assignedRole = "Candidate";
+        } else if (uid && roomData.observerId && uid === roomData.observerId) {
+          assignedRole = "Observer";
+        }
+
+        if (!assignedRole) {
+          setRoomAuthStatus("unauthorized");
+          setRoomAuthError("You are not an assigned participant of this interview room.");
+          return;
+        }
+
+        setRoomRole(assignedRole);
+        setRoomAuthStatus("authorized");
+
+        // Seed verified local participant keyed by stable authentic userId
+        const localName = usr?.name?.trim() || assignedRole;
+        const localColor = getRoleColor(assignedRole.toLowerCase());
+        setParticipantsMap({
+          [uid!]: {
+            id: uid!,
+            userId: uid!,
+            name: localName,
+            role: assignedRole,
+            ini: getInitials(localName, assignedRole.slice(0, 2).toUpperCase()),
+            color: localColor,
+            isSelf: true,
+            mic,
+            cam,
+            speaking: false,
+            handRaised: false,
+            ping: 20,
+          },
+        });
+      } catch (err: any) {
+        if (!active) return;
+        console.error("Room verification failed:", err);
+        const status = err?.response?.status;
+        const msg = err?.response?.data?.message || err?.message;
+        if (status === 403) {
+          setRoomAuthStatus("unauthorized");
+          setRoomAuthError(msg || "You are not authorized to join this interview room.");
+        } else if (status === 404) {
+          setRoomAuthStatus("not_found");
+          setRoomAuthError(msg || "Interview room not found.");
+        } else {
+          setRoomAuthStatus("error");
+          setRoomAuthError(msg || "Failed to verify room membership.");
+        }
+      }
+    };
+
+    void verifyMembership();
+
+    return () => {
+      active = false;
+    };
+  }, [roomId]);
+
+  // Sync local controls & speaking status into participantsMap
+  useEffect(() => {
+    setParticipantsMap(prev => {
+      const selfKey = Object.keys(prev).find(k => prev[k].isSelf) || currentUserId;
+      if (!selfKey) return prev;
+      const current = prev[selfKey];
+      if (!current) return prev;
+      const isSpeaking = Boolean(isCandidate ? speakingStates.candidate : speakingStates.interviewer);
+      const isRaised = Boolean(isCandidate ? raisedHands.candidate : raisedHands.interviewer);
+      if (current.mic === mic && current.cam === cam && current.speaking === isSpeaking && current.handRaised === isRaised) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [selfKey]: {
+          ...current,
+          mic,
+          cam,
+          speaking: isSpeaking,
+          handRaised: isRaised,
+        },
+      };
+    });
+  }, [mic, cam, speakingStates, raisedHands, isCandidate, currentUserId]);
+
+  // Sync remote participant speaking & hand raised status into participantsMap
+  useEffect(() => {
+    setParticipantsMap(prev => {
+      let changed = false;
+      const next = { ...prev };
+      Object.keys(next).forEach(key => {
+        const p = next[key];
+        if (p.isSelf) return;
+        const roleKey = p.role.toLowerCase() as "candidate" | "interviewer";
+        const isSpeaking = Boolean(speakingStates[roleKey]);
+        const isRaised = Boolean(raisedHands[roleKey]);
+        if (p.speaking !== isSpeaking || p.handRaised !== isRaised) {
+          next[key] = { ...p, speaking: isSpeaking, handRaised: isRaised };
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [speakingStates, raisedHands]);
+
+  const participantsList = Object.values(participantsMap);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const stompClientRef = useRef<Client | null>(null);
   const remoteCodeHandlerRef = useRef<((msg: CodeSyncMessage) => void) | null>(null);
+  const remoteChatHandlerRef = useRef<((msg: InterviewChatMessage) => void) | null>(null);
+  const remoteWhiteboardHandlerRef = useRef<((msg: InterviewWhiteboardMessage) => void) | null>(null);
 
   const handleRegisterRemoteCode = useCallback(
     (handler: ((msg: CodeSyncMessage) => void) | null) => {
@@ -1818,6 +3275,50 @@ export default function InterviewRoom() {
     },
     []
   );
+
+  const handleRegisterRemoteChat = useCallback(
+    (handler: ((msg: InterviewChatMessage) => void) | null) => {
+      remoteChatHandlerRef.current = handler;
+    },
+    []
+  );
+
+  const handleRegisterRemoteWhiteboard = useCallback(
+    (handler: ((msg: InterviewWhiteboardMessage) => void) | null) => {
+      remoteWhiteboardHandlerRef.current = handler;
+    },
+    []
+  );
+
+  const handleToggleHand = useCallback(() => {
+    const nextState = !handRaised;
+
+    // Update local state immediately for instant responsive feedback
+    setRaisedHands((prev) => ({
+      ...prev,
+      [selfRoleKey]: nextState,
+    }));
+
+    // Publish to STOMP signaling channel so other participant receives state in real time
+    const client = stompClientRef.current;
+    if (client && client.connected && roomId) {
+      try {
+        client.publish({
+          destination: `/app/interview/${roomId}/signal`,
+          body: JSON.stringify({
+            roomId,
+            type: nextState ? "RAISE_HAND" : "LOWER_HAND",
+            raised: nextState,
+          }),
+        });
+        console.info(`Published ${nextState ? "RAISE_HAND" : "LOWER_HAND"} for room ${roomId}`);
+      } catch (err) {
+        console.error("Failed to publish hand state change via STOMP:", err);
+      }
+    } else {
+      console.warn("STOMP client not connected, hand state toggled locally only");
+    }
+  }, [handRaised, roomId, selfRoleKey]);
 
   const [isExecuting, setIsExecuting] = useState(false);
   const [executionResult, setExecutionResult] = useState<RunInterviewCodeResponse | null>(null);
@@ -1929,6 +3430,16 @@ export default function InterviewRoom() {
   };
 
   const handleLeave = () => {
+    if (stompClientRef.current?.connected && roomId) {
+      try {
+        stompClientRef.current.publish({
+          destination: `/app/interview/${roomId}/leave`,
+          body: JSON.stringify({}),
+        });
+      } catch (e) {
+        console.warn("Could not publish leave message:", e);
+      }
+    }
     if (screenStreamRef.current) {
       screenStreamRef.current.getTracks().forEach(t => t.stop());
       screenStreamRef.current = null;
@@ -1948,10 +3459,12 @@ export default function InterviewRoom() {
     mediaAcquisitionPromiseRef.current = null;
     hasCandidateJoinedRef.current = false;
     stompClientRef.current = null;
+    setRaisedHands({ candidate: false, interviewer: false });
     navigate(isCandidate ? "/candidate" : "/interviewer");
   };
 
   useEffect(() => {
+    if (roomAuthStatus !== "authorized") return;
     let active = true;
     if (!navigator.mediaDevices?.getUserMedia) {
       setMediaError("getUserMedia is not supported");
@@ -2005,9 +3518,10 @@ export default function InterviewRoom() {
       localStreamRef.current = null;
       mediaAcquisitionPromiseRef.current = null;
     };
-  }, []);
+  }, [roomAuthStatus]);
 
   useEffect(() => {
+    if (roomAuthStatus !== "authorized") return;
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
@@ -2061,7 +3575,7 @@ export default function InterviewRoom() {
       remoteIceQueueRef.current = [];
       localIceQueueRef.current = [];
     };
-  }, [roomId]);
+  }, [roomId, roomAuthStatus]);
 
   useEffect(() => {
     if (!localStream || !peerConnectionRef.current) return;
@@ -2096,6 +3610,7 @@ export default function InterviewRoom() {
   };
 
   useEffect(() => {
+    if (roomAuthStatus !== "authorized") return;
     let isActive = true;
     setPresenceStatus("Connecting");
     setPresenceMessages([]);
@@ -2133,17 +3648,85 @@ export default function InterviewRoom() {
               }
 
               if (presence.event === "JOINED") {
-                if (presence.role?.toLowerCase() === "candidate") {
+                const presenceUserId = presence.userId;
+                if (!presenceUserId) return;
+
+                // Validate that this user belongs to this interview room
+                if (interviewRecord) {
+                  const isAssigned = (
+                    presenceUserId === interviewRecord.interviewerId ||
+                    presenceUserId === interviewRecord.candidateId ||
+                    Boolean(interviewRecord.observerId && presenceUserId === interviewRecord.observerId)
+                  );
+                  if (!isAssigned) {
+                    console.warn("Ignoring presence from unassigned user:", presenceUserId);
+                    return;
+                  }
+                }
+
+                const isSelf = Boolean(currentUserId && presenceUserId === currentUserId);
+                const presenceRoleLower = (presence.role || "").toLowerCase();
+                const roleDisplay = presenceRoleLower === "candidate"
+                  ? "Candidate"
+                  : presenceRoleLower === "observer"
+                  ? "Observer"
+                  : "Interviewer";
+
+                const nameDisplay = presence.name?.trim() || (isSelf && currentUserName ? currentUserName : roleDisplay);
+                const color = getRoleColor(presenceRoleLower);
+
+                setParticipantsMap((prev) => {
+                  const copy = { ...prev };
+                  const existing = copy[presenceUserId];
+                  copy[presenceUserId] = {
+                    id: presenceUserId,
+                    userId: presenceUserId,
+                    name: nameDisplay,
+                    role: roleDisplay,
+                    ini: getInitials(nameDisplay, presenceRoleLower.slice(0, 2).toUpperCase()),
+                    color,
+                    isSelf,
+                    mic: isSelf ? mic : (existing ? existing.mic : true),
+                    cam: isSelf ? cam : (existing ? existing.cam : true),
+                    speaking: isSelf
+                      ? Boolean(isCandidate ? speakingStates.candidate : speakingStates.interviewer)
+                      : Boolean(existing?.speaking),
+                    handRaised: isSelf
+                      ? Boolean(isCandidate ? raisedHands.candidate : raisedHands.interviewer)
+                      : Boolean(existing?.handRaised),
+                    ping: existing?.ping ?? (isSelf ? 20 : 35),
+                  };
+                  return copy;
+                });
+
+                if (!isSelf) {
+                  if (!hasAnnouncedToUserRef.current.has(presenceUserId)) {
+                    hasAnnouncedToUserRef.current.add(presenceUserId);
+                    if (client.connected) {
+                      client.publish({
+                        destination: `/app/interview/${roomId}/join`,
+                        body: JSON.stringify({}),
+                      });
+                    }
+                  }
+                }
+
+                if (presenceRoleLower === "candidate") {
                   hasCandidateJoinedRef.current = true;
                   if (!isCandidate) {
                     void createAndSendOffer();
                   }
-                } else if (presence.role?.toLowerCase() === "interviewer") {
-                  if (isCandidate && client.connected) {
-                    client.publish({
-                      destination: `/app/interview/${roomId}/join`,
-                      body: JSON.stringify({}),
-                    });
+                }
+              } else if (presence.event === "LEFT") {
+                if (presence.userId) {
+                  hasAnnouncedToUserRef.current.delete(presence.userId);
+                  setParticipantsMap((prev) => {
+                    const next = { ...prev };
+                    delete next[presence.userId];
+                    return next;
+                  });
+                  if (presence.role?.toLowerCase() === "candidate") {
+                    hasCandidateJoinedRef.current = false;
                   }
                 }
               }
@@ -2160,12 +3743,35 @@ export default function InterviewRoom() {
               const signal = JSON.parse(message.body) as WebRTCSignalMessage;
               if (!signal || !signal.type) return;
 
-              const currentUserId = user?.id || user?._id;
-              const isFromSelf =
-                (signal.senderUserId && signal.senderUserId === currentUserId) ||
-                (signal.senderRole && signal.senderRole.toLowerCase() === userRole.toLowerCase());
+              const isFromSelf = Boolean(
+                signal.senderUserId && currentUserId && signal.senderUserId === currentUserId
+              );
 
               if (isFromSelf) {
+                return;
+              }
+
+              // Handle Hand Raise / Lower signals
+              if (
+                signal.type === "RAISE_HAND" ||
+                signal.type === "LOWER_HAND" ||
+                signal.type === "HAND_STATE"
+              ) {
+                const isRaised =
+                  signal.type === "RAISE_HAND"
+                    ? true
+                    : signal.type === "LOWER_HAND"
+                      ? false
+                      : Boolean(signal.raised);
+
+                const senderRole = signal.senderRole?.toLowerCase();
+                if (senderRole === "candidate" || senderRole === "interviewer") {
+                  setRaisedHands((prev) => ({
+                    ...prev,
+                    [senderRole]: isRaised,
+                  }));
+                  console.info(`Received ${signal.type} from remote ${senderRole}: ${isRaised}`);
+                }
                 return;
               }
 
@@ -2261,10 +3867,9 @@ export default function InterviewRoom() {
               const codeMsg = JSON.parse(message.body) as CodeSyncMessage;
               if (!codeMsg || codeMsg.roomId !== roomId) return;
 
-              const currentUserId = user?.id || user?._id;
-              const isFromSelf =
-                (codeMsg.senderUserId && codeMsg.senderUserId === currentUserId) ||
-                (codeMsg.senderRole && codeMsg.senderRole.toLowerCase() === userRole.toLowerCase());
+              const isFromSelf = Boolean(
+                codeMsg.senderUserId && currentUserId && codeMsg.senderUserId === currentUserId
+              );
 
               if (isFromSelf) {
                 return;
@@ -2277,10 +3882,38 @@ export default function InterviewRoom() {
           },
         );
 
+        const chatSub = client.subscribe(
+          `/topic/interview/${roomId}/chat`,
+          (message) => {
+            try {
+              const chatMsg = JSON.parse(message.body) as InterviewChatMessage;
+              if (!chatMsg || chatMsg.roomId !== roomId) return;
+              remoteChatHandlerRef.current?.(chatMsg);
+            } catch (err) {
+              console.error("Unable to parse chat message", err);
+            }
+          },
+        );
+
+        const whiteboardSub = client.subscribe(
+          `/topic/interview/${roomId}/whiteboard`,
+          (message) => {
+            try {
+              const wbMsg = JSON.parse(message.body) as InterviewWhiteboardMessage;
+              if (!wbMsg || wbMsg.roomId !== roomId) return;
+              remoteWhiteboardHandlerRef.current?.(wbMsg);
+            } catch (err) {
+              console.error("Unable to parse whiteboard message", err);
+            }
+          },
+        );
+
         unsubscribe = () => {
           presenceSub.unsubscribe();
           signalSub.unsubscribe();
           codeSub.unsubscribe();
+          chatSub.unsubscribe();
+          whiteboardSub.unsubscribe();
         };
 
         // Flush any queued local ICE candidates that were collected prior to connect
@@ -2331,12 +3964,13 @@ export default function InterviewRoom() {
       unsubscribe?.();
       stompClientRef.current = null;
       remoteCodeHandlerRef.current = null;
+      remoteChatHandlerRef.current = null;
       hasCandidateJoinedRef.current = false;
       remoteIceQueueRef.current = [];
       localIceQueueRef.current = [];
       void client.deactivate();
     };
-  }, [roomId, isCandidate, user?.id, user?._id, userRole]);
+  }, [roomId, roomAuthStatus, isCandidate, currentUserId, currentUserName, interviewRecord]);
 
   /* ── Fullscreen ── */
   async function toggleFullscreen() {
@@ -2452,6 +4086,89 @@ export default function InterviewRoom() {
     );
   };
 
+  if (roomAuthStatus === "verifying") {
+    return (
+      <div style={{ height: "100dvh", background: C.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: INTER, gap: 16 }}>
+        <Loader2 size={36} color={C.blue} style={{ animation: "spin 1s linear infinite" }} />
+        <div style={{ color: C.tp, fontSize: 16, fontWeight: 600 }}>Verifying Room Membership...</div>
+        <div style={{ color: C.ts, fontSize: 13 }}>Please wait while we verify your interview assignment.</div>
+      </div>
+    );
+  }
+
+  if (roomAuthStatus !== "authorized") {
+    const isForbidden = roomAuthStatus === "unauthorized";
+    const isNotFound = roomAuthStatus === "not_found";
+    const title = isForbidden ? "Access Denied" : isNotFound ? "Room Not Found" : "Unable to Join Room";
+    const description = roomAuthError || (
+      isForbidden
+        ? "You are not a participant of this interview room."
+        : isNotFound
+        ? "The interview room does not exist or has already closed."
+        : "Failed to verify room membership. Please check your network and try again."
+    );
+
+    return (
+      <div style={{ height: "100dvh", background: C.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: INTER, padding: 20 }}>
+        <div style={{
+          background: C.surface,
+          border: `1px solid ${isForbidden ? "rgba(244,63,94,0.3)" : C.border}`,
+          borderRadius: 20,
+          padding: "36px 32px",
+          maxWidth: 440,
+          width: "100%",
+          textAlign: "center",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 16,
+        }}>
+          <div style={{
+            width: 56,
+            height: 56,
+            borderRadius: "50%",
+            background: isForbidden ? "rgba(244,63,94,0.12)" : "rgba(245,158,11,0.12)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}>
+            <ShieldAlert size={28} color={isForbidden ? C.rose : C.amber} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <h2 style={{ color: C.tp, fontSize: 20, fontWeight: 700 }}>{title}</h2>
+            <p style={{ color: C.ts, fontSize: 13, lineHeight: 1.5 }}>{description}</p>
+          </div>
+          <button
+            onClick={() => navigate(globalRole === "candidate" ? "/candidate" : "/interviewer")}
+            style={{
+              marginTop: 8,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 20px",
+              borderRadius: 10,
+              border: "none",
+              background: C.blue,
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "opacity 0.2s",
+            }}
+            onMouseEnter={e => (e.currentTarget.style.opacity = "0.9")}
+            onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
+          >
+            <LogOut size={15} />
+            Return to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const effectiveRole = roomRole ? roomRole.toLowerCase() : (globalRole || "candidate");
+
   return (
     <>
       <style>{`
@@ -2466,7 +4183,13 @@ export default function InterviewRoom() {
       `}</style>
 
       <div ref={containerRef} data-room-id={roomId} style={{ height: "100dvh", background: C.bg, display: "flex", flexDirection: "column", overflow: "hidden", fontFamily: INTER }}>
-        <Navbar timer={timer} onLeave={handleLeave} presenceStatus={presenceStatus} presenceMessages={presenceMessages} />
+        <Navbar
+          timer={timer}
+          onLeave={handleLeave}
+          presenceStatus={presenceStatus}
+          presenceMessages={presenceMessages}
+          participants={participantsList}
+        />
 
         {/* Body */}
         <div style={{ display: "flex", flex: 1, overflow: "hidden", padding: "62px 10px 10px 10px", gap: 10 }}>
@@ -2478,7 +4201,7 @@ export default function InterviewRoom() {
               showParticipants={showParticipants} whiteboardActive={whiteboardActive}
               onMic={toggleMic} onCam={toggleCam}
               onScreen={toggleScreenShare}
-              onHand={() => setHandRaised(!handRaised)}
+              onHand={handleToggleHand}
               onBlur={() => setBlurred(!blurred)}
               onFullscreen={toggleFullscreen}
               onParticipants={() => setShowParticipants(!showParticipants)}
@@ -2488,14 +4211,16 @@ export default function InterviewRoom() {
               remoteStream={remoteStream}
               mediaError={mediaError}
               isCandidate={isCandidate}
-              userName={userName}
+              userName={currentUserName}
               onLeave={handleLeave}
+              raisedHands={raisedHands}
+              onSpeakingChange={setSpeakingStates}
+              participants={participantsList}
             />
             {showParticipants && (
               <ParticipantsSidebar
                 onClose={() => setShowParticipants(false)}
-                isCandidate={isCandidate}
-                userName={userName}
+                participants={participantsList}
               />
             )}
           </div>
@@ -2529,16 +4254,34 @@ export default function InterviewRoom() {
                     roomId={roomId}
                     stompClientRef={stompClientRef}
                     onRegisterRemoteCodeHandler={handleRegisterRemoteCode}
-                    currentUserId={user?.id || user?._id}
-                    userRole={userRole}
+                    currentUserId={currentUserId}
+                    userRole={effectiveRole}
                     isExecuting={isExecuting}
                     onRunCode={handleRunCode}
                   />
                 </div>
                 <div style={{ display: !whiteboardActive && rightTab === "chat" ? "block" : "none", height: "100%", width: "100%" }}>
-                  <ChatPanel />
+                  <ChatPanel
+                    roomId={roomId}
+                    stompClientRef={stompClientRef}
+                    isCandidate={isCandidate}
+                    userRole={effectiveRole}
+                    currentUserId={currentUserId}
+                    currentUserName={currentUserName}
+                    isConnected={presenceStatus === "Connected"}
+                    onRegisterRemoteChatHandler={handleRegisterRemoteChat}
+                  />
                 </div>
-                {whiteboardActive && <Whiteboard onClose={() => setWhiteboardActive(false)} />}
+                <div style={{ display: whiteboardActive ? "block" : "none", height: "100%", width: "100%" }}>
+                  <Whiteboard
+                    onClose={() => setWhiteboardActive(false)}
+                    roomId={roomId}
+                    stompClientRef={stompClientRef}
+                    onRegisterRemoteWhiteboardHandler={handleRegisterRemoteWhiteboard}
+                    currentUserId={currentUserId}
+                    userRole={effectiveRole}
+                  />
+                </div>
               </div>
             </GlassCard>
 

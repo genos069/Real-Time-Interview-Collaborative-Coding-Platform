@@ -211,8 +211,37 @@ public class InterviewService {
         );
     }
 
-    // Start interview
+    // Get interview by roomId with room membership authorization
+    public Interview getInterviewByRoomId(String roomId) {
+        if (roomId == null || roomId.trim().isEmpty()) {
+            throw new ApiException("Room ID is required", HttpStatus.BAD_REQUEST);
+        }
 
+        Interview interview = interviewRepository.findByRoomId(roomId)
+                .orElseThrow(() -> new ApiException("Interview room not found", HttpStatus.NOT_FOUND));
+
+        User user = userService.getLoggedInUser();
+        if (user == null) {
+            throw new ApiException("Unauthorized", HttpStatus.UNAUTHORIZED);
+        }
+
+        boolean authorized = false;
+        if ("interviewer".equalsIgnoreCase(user.getRole())) {
+            authorized = user.getId().equals(interview.getInterviewerId());
+        } else if ("candidate".equalsIgnoreCase(user.getRole())) {
+            authorized = user.getId().equals(interview.getCandidateId());
+        } else if ("observer".equalsIgnoreCase(user.getRole())) {
+            authorized = interview.getObserverId() != null && user.getId().equals(interview.getObserverId());
+        }
+
+        if (!authorized) {
+            throw new ApiException("You are not authorized to access this interview room", HttpStatus.FORBIDDEN);
+        }
+
+        return interview;
+    }
+
+    // Start interview
     public Interview startInterview(String roomId) {
 
         // Get logged-in user
