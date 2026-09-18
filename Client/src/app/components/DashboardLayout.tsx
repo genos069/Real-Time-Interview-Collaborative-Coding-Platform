@@ -82,7 +82,7 @@ export function DashboardLayout({
   activeSection,
   onSectionChange,
   children,
-  userName = "Arjun Mehta",
+  userName = "Enter your name",
   userInitials = "AM",
   notifications,
 }: Props) {

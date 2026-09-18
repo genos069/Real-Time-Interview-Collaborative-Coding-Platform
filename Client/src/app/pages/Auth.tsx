@@ -217,7 +217,7 @@ export default function Auth() {
               {role === "interviewer" ? "RL" : "AK"}
             </div>
             <div>
-              <p className="text-white text-xs font-semibold">{role === "interviewer" ? "Rachel Lin" : "Arjun Mehta"}</p>
+              <p className="text-white text-xs font-semibold">{role === "interviewer" ? "Rachel Lin" : "Enter your name"}</p>
               <p className="text-white/35 text-xs">{role === "interviewer" ? "Engineering Manager · Stripe" : "Software Engineer · Google"}</p>
             </div>
           </div>
@@ -304,7 +304,7 @@ export default function Auth() {
                     name="name"
                     value={formData.name}
                     onChange={handleChange}
-                    placeholder="Arjun Mehta"
+                    placeholder="Enter your name"
                     className="w-full bg-white border border-[#0d1b2a]/12 rounded-xl pl-10 pr-4 py-3 text-[#0d1b2a] placeholder-[#4a6080]/50 text-sm focus:outline-none focus:ring-2 focus:ring-[#00bfa6]/30 focus:border-[#00bfa6]/60 transition-all"
                     required
                   />
@@ -324,7 +324,7 @@ export default function Auth() {
                   name="email"
                   value={formData.email}
                   onChange={handleChange}
-                  placeholder="arjun@company.com"
+                  placeholder="Enter your email"
                   className="w-full bg-white border border-[#0d1b2a]/12 rounded-xl pl-10 pr-4 py-3 text-[#0d1b2a] placeholder-[#4a6080]/50 text-sm focus:outline-none focus:ring-2 focus:ring-[#00bfa6]/30 focus:border-[#00bfa6]/60 transition-all"
                   required
                 />

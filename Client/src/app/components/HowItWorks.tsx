@@ -1,8 +1,8 @@
 const steps = [
   { num: "01", title: "Create Your Profile", desc: "Sign up as a candidate or interviewer. Add your skills, role preferences, and availability in under 5 minutes." },
-  { num: "02", title: "Schedule a Session", desc: "Candidates book mock or real interviews. Interviewers set open slots. AI auto-matches for the best fit." },
+  { num: "02", title: "Create a Session", desc: "Candidates book mock or real interviews. Interviewers set open slots." },
   { num: "03", title: "Conduct the Interview", desc: "Join your HD video room with built-in code editor, whiteboard, and structured question sets." },
-  { num: "04", title: "Review AI Insights", desc: "Get instant score breakdowns on communication, problem-solving, and technical accuracy. Replay sessions anytime." },
+  { num: "04", title: "Review AI Insights", desc: "Get instant score breakdowns on communication, problem-solving, and technical accuracy." },
 ];
 
 export function HowItWorks() {

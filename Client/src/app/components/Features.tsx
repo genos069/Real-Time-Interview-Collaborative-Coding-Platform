@@ -9,12 +9,12 @@ const features = [
   {
     icon: Code2,
     title: "Live Code Editor",
-    desc: "Built-in collaborative IDE with syntax highlighting, 40+ languages, and real-time execution.",
+    desc: "Built-in collaborative IDE with syntax highlighting, multiple languages, and real-time execution.",
   },
   {
     icon: Video,
     title: "HD Video Sessions",
-    desc: "Crystal-clear video with automatic recording, noise cancellation, and session replay.",
+    desc: "Seamless video collaboration with screen sharing, video sharing, and an interactive whiteboard for effective real-time interviews.",
   },
   {
     icon: BarChart3,
@@ -23,13 +23,13 @@ const features = [
   },
   {
     icon: Clock,
-    title: "Smart Scheduling",
-    desc: "Auto-match candidates with interviewers based on skills, timezone, and availability.",
+    title: "Real-Time Collaboration",
+    desc: "Conduct live interviews with synchronized coding, video communication, screen sharing, and interactive collaboration tools.",
   },
   {
     icon: Shield,
-    title: "Enterprise Security",
-    desc: "SOC 2 Type II certified, end-to-end encrypted, with SSO and granular role controls.",
+    title: "Secure Interview Rooms",
+    desc: "Dedicated interview rooms with controlled access, candidate management, and secure real-time communication.",
   },
 ];
 

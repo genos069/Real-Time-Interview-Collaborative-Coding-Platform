@@ -46,7 +46,7 @@ export function Hero() {
             style={{ fontFamily: "'DM Sans', sans-serif", fontWeight: 500 }}
           >
             <Star className="w-3 h-3 fill-current" />
-            Trusted by 50,000+ professionals
+            Powered by AI
           </div>
 
           <h1
@@ -82,24 +82,8 @@ export function Hero() {
             </a>
           </div>
 
-          {/* Social proof */}
-          <div className="flex items-center gap-6 border-t border-white/10 pt-8">
-            <div className="flex -space-x-2">
-              {["bg-blue-400", "bg-emerald-400", "bg-violet-400", "bg-orange-400"].map((color, i) => (
-                <div key={i} className={`w-8 h-8 rounded-full ${color} border-2 border-[#0d1b2a] flex items-center justify-center text-[10px] text-white font-semibold`}>
-                  {["AK", "MR", "SL", "+"][i]}
-                </div>
-              ))}
-            </div>
-            <div>
-              <div className="flex gap-0.5 mb-0.5">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <Star key={i} className="w-3 h-3 fill-[#00bfa6] text-[#00bfa6]" />
-                ))}
-              </div>
-              <p className="text-white/50 text-xs" style={{ fontFamily: "'DM Sans', sans-serif" }}>4.9/5 from 3,200+ reviews</p>
-            </div>
-          </div>
+          
+          
         </div>
 
         {/* Right: mock video card */}

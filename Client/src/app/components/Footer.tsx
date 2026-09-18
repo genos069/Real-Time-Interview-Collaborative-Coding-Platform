@@ -20,9 +20,8 @@ export function Footer() {
           </div>
 
           {[
-            { heading: "Product", links: ["Features", "Pricing", "Integrations", "Changelog"] },
-            { heading: "Company", links: ["About", "Blog", "Careers", "Press"] },
-            { heading: "Support", links: ["Help Center", "Privacy Policy", "Terms of Service", "Contact"] },
+            // { heading: "Product", links: ["Features"] },
+            // { heading: "Support", links: ["Help Center", "Privacy Policy", "Terms of Service", "Contact"] },
           ].map(({ heading, links }) => (
             <div key={heading}>
               <h4 className="text-white text-sm mb-4" style={{ fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>{heading}</h4>
@@ -37,12 +36,9 @@ export function Footer() {
           ))}
         </div>
 
-        <div className="border-t border-white/8 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="border-t border-white/8 pt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
           <p className="text-white/30 text-xs" style={{ fontFamily: "'DM Sans', sans-serif" }}>
             © 2026 CodeGear. All rights reserved.
-          </p>
-          <p className="text-white/30 text-xs" style={{ fontFamily: "'DM Sans', sans-serif" }}>
-            SOC 2 Type II · GDPR Compliant · ISO 27001
           </p>
         </div>
       </div>

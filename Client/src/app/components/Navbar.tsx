@@ -32,7 +32,7 @@ export function Navbar() {
           >
             How It Works
           </a>
-          <a
+          <a hidden
             href="#"
             className="text-white/70 hover:text-white transition-colors text-sm"
             style={{ fontFamily: "'DM Sans', sans-serif" }}
