@@ -27,7 +27,14 @@ export const fetchDashboard = async (): Promise<DashboardResponse> => {
       codingTimeSeconds: data.stats?.codingTimeSeconds ?? 0,
       mockSessions: data.stats?.mockSessions ?? 0,
       weeklyImprovement: data.stats?.weeklyImprovement ?? 0,
+      totalCompletedRealInterviews: data.stats?.totalCompletedRealInterviews ?? data.totalCompletedRealInterviews ?? 0,
+      totalCompletedMockInterviews: data.stats?.totalCompletedMockInterviews ?? data.totalCompletedMockInterviews ?? 0,
+      averageRealInterviewScore: data.stats?.averageRealInterviewScore ?? data.averageRealInterviewScore ?? null,
     },
+
+    totalCompletedRealInterviews: data.totalCompletedRealInterviews ?? data.stats?.totalCompletedRealInterviews ?? 0,
+    totalCompletedMockInterviews: data.totalCompletedMockInterviews ?? data.stats?.totalCompletedMockInterviews ?? 0,
+    averageRealInterviewScore: data.averageRealInterviewScore ?? data.stats?.averageRealInterviewScore ?? null,
 
     skillBreakdown: data.skillBreakdown ?? {
       confidence: 0,

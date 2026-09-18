@@ -10,6 +10,12 @@ public class DashboardStatsResponse {
 
     private int weeklyImprovement;
 
+    private int totalCompletedRealInterviews;
+
+    private int totalCompletedMockInterviews;
+
+    private Double averageRealInterviewScore;
+
     public DashboardStatsResponse() {
     }
 
@@ -23,6 +29,25 @@ public class DashboardStatsResponse {
         this.codingTimeSeconds = codingTimeSeconds;
         this.mockSessions = mockSessions;
         this.weeklyImprovement = weeklyImprovement;
+        this.totalCompletedMockInterviews = mockSessions;
+    }
+
+    public DashboardStatsResponse(
+            int questionsSolved,
+            long codingTimeSeconds,
+            int mockSessions,
+            int weeklyImprovement,
+            int totalCompletedRealInterviews,
+            int totalCompletedMockInterviews,
+            Double averageRealInterviewScore
+    ) {
+        this.questionsSolved = questionsSolved;
+        this.codingTimeSeconds = codingTimeSeconds;
+        this.mockSessions = mockSessions;
+        this.weeklyImprovement = weeklyImprovement;
+        this.totalCompletedRealInterviews = totalCompletedRealInterviews;
+        this.totalCompletedMockInterviews = totalCompletedMockInterviews;
+        this.averageRealInterviewScore = averageRealInterviewScore;
     }
 
     public int getQuestionsSolved() {
@@ -55,5 +80,29 @@ public class DashboardStatsResponse {
 
     public void setWeeklyImprovement(int weeklyImprovement) {
         this.weeklyImprovement = weeklyImprovement;
+    }
+
+    public int getTotalCompletedRealInterviews() {
+        return totalCompletedRealInterviews;
+    }
+
+    public void setTotalCompletedRealInterviews(int totalCompletedRealInterviews) {
+        this.totalCompletedRealInterviews = totalCompletedRealInterviews;
+    }
+
+    public int getTotalCompletedMockInterviews() {
+        return totalCompletedMockInterviews;
+    }
+
+    public void setTotalCompletedMockInterviews(int totalCompletedMockInterviews) {
+        this.totalCompletedMockInterviews = totalCompletedMockInterviews;
+    }
+
+    public Double getAverageRealInterviewScore() {
+        return averageRealInterviewScore;
+    }
+
+    public void setAverageRealInterviewScore(Double averageRealInterviewScore) {
+        this.averageRealInterviewScore = averageRealInterviewScore;
     }
 }

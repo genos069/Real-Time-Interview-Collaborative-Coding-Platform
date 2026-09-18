@@ -28,6 +28,12 @@ public class DashboardResponse {
 
     private List<Object> experience;
 
+    private int totalCompletedRealInterviews;
+
+    private int totalCompletedMockInterviews;
+
+    private Double averageRealInterviewScore;
+
     public DashboardResponse() {
     }
 
@@ -117,5 +123,29 @@ public class DashboardResponse {
 
     public void setExperience(List<Object> experience) {
         this.experience = experience;
+    }
+
+    public int getTotalCompletedRealInterviews() {
+        return totalCompletedRealInterviews;
+    }
+
+    public void setTotalCompletedRealInterviews(int totalCompletedRealInterviews) {
+        this.totalCompletedRealInterviews = totalCompletedRealInterviews;
+    }
+
+    public int getTotalCompletedMockInterviews() {
+        return totalCompletedMockInterviews;
+    }
+
+    public void setTotalCompletedMockInterviews(int totalCompletedMockInterviews) {
+        this.totalCompletedMockInterviews = totalCompletedMockInterviews;
+    }
+
+    public Double getAverageRealInterviewScore() {
+        return averageRealInterviewScore;
+    }
+
+    public void setAverageRealInterviewScore(Double averageRealInterviewScore) {
+        this.averageRealInterviewScore = averageRealInterviewScore;
     }
 }

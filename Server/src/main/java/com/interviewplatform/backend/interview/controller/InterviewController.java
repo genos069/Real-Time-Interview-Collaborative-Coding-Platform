@@ -1,9 +1,13 @@
 package com.interviewplatform.backend.interview.controller;
 
 import com.interviewplatform.backend.interview.dto.CreateInterviewRequest;
+import com.interviewplatform.backend.interview.dto.InterviewRoomScoresResponse;
+import com.interviewplatform.backend.interview.dto.InterviewScoreRequest;
+import com.interviewplatform.backend.interview.dto.InterviewScoreResponse;
 import com.interviewplatform.backend.interview.dto.RunInterviewCodeRequest;
 import com.interviewplatform.backend.interview.dto.RunInterviewCodeResponse;
 import com.interviewplatform.backend.interview.model.Interview;
+import com.interviewplatform.backend.interview.model.InterviewScore;
 import com.interviewplatform.backend.interview.service.InterviewService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -98,20 +102,60 @@ public class InterviewController {
         return ResponseEntity.ok(interview);
     }
 
-    // End interview
-
-    @PostMapping("/{roomId}/end")
-    public ResponseEntity<Interview> endInterview(
+    // Finish / End interview
+    @PostMapping({ "/{roomId}/finish", "/{roomId}/end" })
+    public ResponseEntity<Interview> finishInterview(
             @PathVariable String roomId
     ) {
 
         Interview interview =
-                interviewService.endInterview(roomId);
+                interviewService.finishInterview(roomId);
 
         return ResponseEntity.ok(interview);
     }
 
-    // Score candidate
+    // Submit score (unified endpoint)
+    @PostMapping("/score")
+    public ResponseEntity<InterviewScoreResponse> submitScore(
+            @RequestBody InterviewScoreRequest request
+    ) {
+        String targetId = request.getInterviewId();
+        InterviewScore score = interviewService.submitScore(targetId, request.getScore());
+        return ResponseEntity.status(HttpStatus.CREATED).body(InterviewScoreResponse.fromEntity(score));
+    }
+
+    // Submit score with roomId in path
+    @PostMapping("/{roomId}/score")
+    public ResponseEntity<InterviewScoreResponse> submitScoreWithRoomId(
+            @PathVariable String roomId,
+            @RequestBody InterviewScoreRequest request
+    ) {
+        Integer scoreValue = request != null ? request.getScore() : null;
+        InterviewScore score = interviewService.submitScore(roomId, scoreValue);
+        return ResponseEntity.status(HttpStatus.CREATED).body(InterviewScoreResponse.fromEntity(score));
+    }
+
+    // Get bidirectional scores for a specific interview room
+    @GetMapping("/{roomId}/scores")
+    public ResponseEntity<InterviewRoomScoresResponse> getInterviewScores(
+            @PathVariable String roomId
+    ) {
+        return ResponseEntity.ok(interviewService.getInterviewScores(roomId));
+    }
+
+    // Get all scores submitted by current user
+    @GetMapping("/scores/given")
+    public ResponseEntity<List<InterviewScoreResponse>> getScoresGivenByCurrentUser() {
+        return ResponseEntity.ok(interviewService.getScoresGivenByCurrentUser());
+    }
+
+    // Get all scores received by current user
+    @GetMapping("/scores/received")
+    public ResponseEntity<List<InterviewScoreResponse>> getScoresReceivedByCurrentUser() {
+        return ResponseEntity.ok(interviewService.getScoresReceivedByCurrentUser());
+    }
+
+    // Score candidate (legacy endpoint)
     @PutMapping("/{roomId}/score/candidate")
     public ResponseEntity<Interview> scoreCandidate(
             @PathVariable String roomId,
@@ -128,7 +172,7 @@ public class InterviewController {
     }
 
 
-    // Score interviewer
+    // Score interviewer (legacy endpoint)
     @PutMapping("/{roomId}/score/interviewer")
     public ResponseEntity<Interview> scoreInterviewer(
             @PathVariable String roomId,

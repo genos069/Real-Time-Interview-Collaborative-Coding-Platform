@@ -6,10 +6,15 @@ import com.interviewplatform.backend.integration.onlinecompiler.OnlineCompilerCl
 import com.interviewplatform.backend.integration.onlinecompiler.OnlineCompilerRequest;
 import com.interviewplatform.backend.integration.onlinecompiler.OnlineCompilerResponse;
 import com.interviewplatform.backend.interview.dto.CreateInterviewRequest;
+import com.interviewplatform.backend.interview.dto.InterviewRoomScoresResponse;
+import com.interviewplatform.backend.interview.dto.InterviewScoreResponse;
 import com.interviewplatform.backend.interview.dto.RunInterviewCodeRequest;
 import com.interviewplatform.backend.interview.dto.RunInterviewCodeResponse;
 import com.interviewplatform.backend.interview.model.Interview;
+import com.interviewplatform.backend.interview.model.InterviewScore;
 import com.interviewplatform.backend.interview.repository.InterviewRepository;
+import com.interviewplatform.backend.interview.repository.InterviewScoreRepository;
+import com.interviewplatform.backend.interview.websocket.InterviewEventMessage;
 import com.interviewplatform.backend.model.User;
 import com.interviewplatform.backend.repository.UserRepository;
 import com.interviewplatform.backend.bot.exception.ApiException;
@@ -26,6 +31,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Service
 public class InterviewService {
@@ -38,16 +44,44 @@ public class InterviewService {
 
     private final OnlineCompilerClient onlineCompilerClient;
 
+    private final InterviewScoreRepository interviewScoreRepository;
+
+    private final org.springframework.messaging.simp.SimpMessagingTemplate messagingTemplate;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public InterviewService(
+            InterviewRepository interviewRepository,
+            UserRepository userRepository,
+            UserService userService,
+            OnlineCompilerClient onlineCompilerClient,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) InterviewScoreRepository interviewScoreRepository,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) org.springframework.messaging.simp.SimpMessagingTemplate messagingTemplate
+    ) {
+        this.interviewRepository = interviewRepository;
+        this.userRepository = userRepository;
+        this.userService = userService;
+        this.onlineCompilerClient = onlineCompilerClient;
+        this.interviewScoreRepository = interviewScoreRepository;
+        this.messagingTemplate = messagingTemplate;
+    }
+
+    public InterviewService(
+            InterviewRepository interviewRepository,
+            UserRepository userRepository,
+            UserService userService,
+            OnlineCompilerClient onlineCompilerClient,
+            org.springframework.messaging.simp.SimpMessagingTemplate messagingTemplate
+    ) {
+        this(interviewRepository, userRepository, userService, onlineCompilerClient, null, messagingTemplate);
+    }
+
     public InterviewService(
             InterviewRepository interviewRepository,
             UserRepository userRepository,
             UserService userService,
             OnlineCompilerClient onlineCompilerClient
     ) {
-        this.interviewRepository = interviewRepository;
-        this.userRepository = userRepository;
-        this.userService = userService;
-        this.onlineCompilerClient = onlineCompilerClient;
+        this(interviewRepository, userRepository, userService, onlineCompilerClient, null, null);
     }
 
 
@@ -69,23 +103,43 @@ public class InterviewService {
                 interviewer.getRole()
         )) {
 
-            throw new RuntimeException(
-                    "Only interviewers can create interviews"
+            throw new ApiException(
+                    "Only interviewers can create interviews",
+                    HttpStatus.FORBIDDEN
             );
         }
 
 
         // Find candidate
 
-        User candidate =
-                userRepository.findById(
-                                request.getCandidateId()
-                        )
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Candidate not found"
-                                )
-                        );
+        User candidate;
+        if (request.getCandidateEmail() != null && !request.getCandidateEmail().trim().isEmpty()) {
+            String email = request.getCandidateEmail().trim();
+            candidate = userRepository.findByEmailIgnoreCase(email)
+                    .orElseGet(() -> userRepository.findByEmail(email)
+                            .orElseThrow(() ->
+                                    new ApiException(
+                                            "Candidate not found with email: " + email,
+                                            HttpStatus.NOT_FOUND
+                                    )
+                            )
+                    );
+        } else if (request.getCandidateId() != null && !request.getCandidateId().trim().isEmpty()) {
+            candidate = userRepository.findById(
+                            request.getCandidateId().trim()
+                    )
+                    .orElseThrow(() ->
+                            new ApiException(
+                                    "Candidate not found",
+                                    HttpStatus.NOT_FOUND
+                            )
+                    );
+        } else {
+            throw new ApiException(
+                    "Candidate email or candidate ID is required",
+                    HttpStatus.BAD_REQUEST
+            );
+        }
 
 
         // Candidate validation
@@ -94,8 +148,9 @@ public class InterviewService {
                 candidate.getRole()
         )) {
 
-            throw new RuntimeException(
-                    "The selected user is not a candidate"
+            throw new ApiException(
+                    "The selected user is not a candidate",
+                    HttpStatus.BAD_REQUEST
             );
         }
 
@@ -381,254 +436,316 @@ public class InterviewService {
         return interview;
     }
 
-    // End interview
-
-    public Interview endInterview(String roomId) {
+    // Finish interview
+    public Interview finishInterview(String roomId) {
+        if (roomId == null || roomId.trim().isEmpty()) {
+            throw new ApiException("Room ID is required", HttpStatus.BAD_REQUEST);
+        }
 
         // Get logged-in user
-
-        User interviewer =
-                userService.getLoggedInUser();
-
+        User interviewer = userService.getLoggedInUser();
+        if (interviewer == null) {
+            throw new ApiException("Unauthorized", HttpStatus.UNAUTHORIZED);
+        }
 
         // Role validation
-
-        if (!"interviewer".equalsIgnoreCase(
-                interviewer.getRole()
-        )) {
-
-            throw new RuntimeException(
-                    "Only interviewers can end interviews"
+        if (!"interviewer".equalsIgnoreCase(interviewer.getRole())) {
+            throw new ApiException(
+                    "Only interviewers can finish interviews",
+                    HttpStatus.FORBIDDEN
             );
         }
-
 
         // Find interview
-
-        Interview interview =
-                interviewRepository.findByRoomId(roomId)
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Interview room not found"
-                                )
-                        );
-
+        Interview interview = interviewRepository.findByRoomId(roomId)
+                .orElseThrow(() ->
+                        new ApiException(
+                                "Interview room not found",
+                                HttpStatus.NOT_FOUND
+                        )
+                );
 
         // Ownership validation
-
-        if (!interviewer.getId().equals(
-                interview.getInterviewerId()
-        )) {
-
-            throw new RuntimeException(
-                    "You are not the interviewer of this room"
+        if (!interviewer.getId().equals(interview.getInterviewerId())) {
+            throw new ApiException(
+                    "You are not authorized to finish this interview",
+                    HttpStatus.FORBIDDEN
             );
         }
 
+        // Safe idempotent handling for repeated finish requests
+        if ("COMPLETED".equalsIgnoreCase(interview.getStatus())) {
+            return interview;
+        }
 
         // Status validation
-
-        if (!"ACTIVE".equalsIgnoreCase(
-                interview.getStatus()
-        )) {
-
-            throw new RuntimeException(
-                    "Only active interviews can be ended"
+        if (!"ACTIVE".equalsIgnoreCase(interview.getStatus())) {
+            throw new ApiException(
+                    "Interview cannot be finished. Current status: " + interview.getStatus(),
+                    HttpStatus.BAD_REQUEST
             );
         }
 
-
         // End interview
-
-        LocalDateTime now =
-                LocalDateTime.now();
-
-        interview.setStatus(
-                "COMPLETED"
-        );
-
+        LocalDateTime now = LocalDateTime.now();
+        interview.setStatus("COMPLETED");
         interview.setEndedAt(now);
-
         interview.setUpdatedAt(now);
 
-
         // Save interview
+        Interview savedInterview = interviewRepository.save(interview);
 
-        return interviewRepository.save(
-                interview
+        // Broadcast real-time completion event to room topic
+        if (messagingTemplate != null) {
+            try {
+                InterviewEventMessage eventMessage = new InterviewEventMessage(
+                        roomId,
+                        "INTERVIEW_COMPLETED",
+                        "COMPLETED",
+                        "Interview has been completed by the interviewer.",
+                        interviewer.getRole(),
+                        interviewer.getId()
+                );
+                messagingTemplate.convertAndSend(
+                        "/topic/interview/" + roomId + "/events",
+                        eventMessage
+                );
+            } catch (Exception e) {
+                System.err.println("Failed to broadcast interview completion event: " + e.getMessage());
+            }
+        }
+
+        return savedInterview;
+    }
+
+    // End interview (alias for finishInterview)
+    public Interview endInterview(String roomId) {
+        return finishInterview(roomId);
+    }
+
+    // Mutual Interview Scoring
+
+    public InterviewScore submitScore(
+            String interviewIdOrRoomId,
+            Integer score
+    ) {
+        if (interviewIdOrRoomId == null || interviewIdOrRoomId.trim().isEmpty()) {
+            throw new ApiException(
+                    "Interview ID is required",
+                    HttpStatus.BAD_REQUEST
+            );
+        }
+
+        User currentUser = userService.getLoggedInUser();
+        if (currentUser == null) {
+            throw new ApiException(
+                    "Unauthorized",
+                    HttpStatus.UNAUTHORIZED
+            );
+        }
+
+        if (score == null || score < 0 || score > 100) {
+            throw new ApiException(
+                    "Score must be between 0 and 100",
+                    HttpStatus.BAD_REQUEST
+            );
+        }
+
+        String targetId = interviewIdOrRoomId.trim();
+        Interview interview = interviewRepository.findByRoomId(targetId)
+                .orElseGet(() -> interviewRepository.findById(targetId)
+                        .orElseThrow(() -> new ApiException(
+                                "Interview room not found",
+                                HttpStatus.NOT_FOUND
+                        )));
+
+        if (!"COMPLETED".equalsIgnoreCase(interview.getStatus())) {
+            throw new ApiException(
+                    "Interview must be completed before submitting evaluation",
+                    HttpStatus.BAD_REQUEST
+            );
+        }
+
+        boolean isInterviewer = currentUser.getId().equals(interview.getInterviewerId());
+        boolean isCandidate = currentUser.getId().equals(interview.getCandidateId());
+
+        if (!isInterviewer && !isCandidate) {
+            throw new ApiException(
+                    "You are not authorized to score this interview",
+                    HttpStatus.FORBIDDEN
+            );
+        }
+
+        if (isInterviewer && isCandidate) {
+            throw new ApiException(
+                    "User cannot score themselves",
+                    HttpStatus.BAD_REQUEST
+            );
+        }
+
+        String scorerUserId = currentUser.getId();
+        String scorerRole = isInterviewer ? "INTERVIEWER" : "CANDIDATE";
+        String recipientUserId = isInterviewer ? interview.getCandidateId() : interview.getInterviewerId();
+        String recipientRole = isInterviewer ? "CANDIDATE" : "INTERVIEWER";
+
+        if (scorerUserId.equals(recipientUserId)) {
+            throw new ApiException(
+                    "User cannot score themselves",
+                    HttpStatus.BAD_REQUEST
+            );
+        }
+
+        if (interviewScoreRepository != null) {
+            boolean alreadySubmitted = interviewScoreRepository.existsByInterviewIdAndScorerUserId(interview.getId(), scorerUserId)
+                    || interviewScoreRepository.existsByRoomIdAndScorerUserId(interview.getRoomId(), scorerUserId);
+            if (alreadySubmitted) {
+                throw new ApiException(
+                    "Score has already been submitted for this interview",
+                    HttpStatus.CONFLICT
+                );
+            }
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        InterviewScore interviewScore = new InterviewScore(
+                interview.getId(),
+                interview.getRoomId(),
+                scorerUserId,
+                scorerRole,
+                recipientUserId,
+                recipientRole,
+                score,
+                now,
+                now
+        );
+
+        InterviewScore savedScore = interviewScore;
+        if (interviewScoreRepository != null) {
+            savedScore = interviewScoreRepository.save(interviewScore);
+        }
+
+        // Update Interview entity evaluation score
+        if (isInterviewer) {
+            interview.setCandidateScore(score);
+        } else {
+            interview.setInterviewerScore(score);
+        }
+        interview.setUpdatedAt(now);
+        interviewRepository.save(interview);
+
+        return savedScore;
+    }
+
+    public InterviewRoomScoresResponse getInterviewScores(String interviewIdOrRoomId) {
+        if (interviewIdOrRoomId == null || interviewIdOrRoomId.trim().isEmpty()) {
+            throw new ApiException(
+                    "Interview ID is required",
+                    HttpStatus.BAD_REQUEST
+            );
+        }
+
+        User currentUser = userService.getLoggedInUser();
+        if (currentUser == null) {
+            throw new ApiException(
+                    "Unauthorized",
+                    HttpStatus.UNAUTHORIZED
+            );
+        }
+
+        String targetId = interviewIdOrRoomId.trim();
+        Interview interview = interviewRepository.findByRoomId(targetId)
+                .orElseGet(() -> interviewRepository.findById(targetId)
+                        .orElseThrow(() -> new ApiException(
+                                "Interview room not found",
+                                HttpStatus.NOT_FOUND
+                        )));
+
+        boolean isInterviewer = currentUser.getId().equals(interview.getInterviewerId());
+        boolean isCandidate = currentUser.getId().equals(interview.getCandidateId());
+        if (!isInterviewer && !isCandidate) {
+            throw new ApiException(
+                    "You are not authorized to view scores for this interview",
+                    HttpStatus.FORBIDDEN
+            );
+        }
+
+        List<InterviewScore> scores = new ArrayList<>();
+        if (interviewScoreRepository != null) {
+            scores = interviewScoreRepository.findByRoomId(interview.getRoomId());
+            if (scores.isEmpty() && interview.getId() != null) {
+                scores = interviewScoreRepository.findByInterviewId(interview.getId());
+            }
+        }
+
+        List<InterviewScoreResponse> scoreResponses = scores.stream()
+                .map(InterviewScoreResponse::fromEntity)
+                .collect(Collectors.toList());
+
+        return new InterviewRoomScoresResponse(
+                interview.getId(),
+                interview.getRoomId(),
+                interview.getCandidateScore(),
+                interview.getInterviewerScore(),
+                scoreResponses
         );
     }
 
-    // Submit candidate score
+    public List<InterviewScoreResponse> getScoresGivenByCurrentUser() {
+        User currentUser = userService.getLoggedInUser();
+        if (currentUser == null) {
+            throw new ApiException(
+                    "Unauthorized",
+                    HttpStatus.UNAUTHORIZED
+            );
+        }
 
+        if (interviewScoreRepository == null) {
+            return new ArrayList<>();
+        }
+
+        return interviewScoreRepository.findByScorerUserIdOrderByCreatedAtDesc(currentUser.getId())
+                .stream()
+                .map(InterviewScoreResponse::fromEntity)
+                .collect(Collectors.toList());
+    }
+
+    public List<InterviewScoreResponse> getScoresReceivedByCurrentUser() {
+        User currentUser = userService.getLoggedInUser();
+        if (currentUser == null) {
+            throw new ApiException(
+                    "Unauthorized",
+                    HttpStatus.UNAUTHORIZED
+            );
+        }
+
+        if (interviewScoreRepository == null) {
+            return new ArrayList<>();
+        }
+
+        return interviewScoreRepository.findByRecipientUserIdOrderByCreatedAtDesc(currentUser.getId())
+                .stream()
+                .map(InterviewScoreResponse::fromEntity)
+                .collect(Collectors.toList());
+    }
+
+    // Submit candidate score (legacy method)
     public Interview submitCandidateScore(
             String roomId,
             Integer score
     ) {
-
-        // Get logged-in user
-
-        User interviewer =
-                userService.getLoggedInUser();
-
-
-        // Role validation
-
-        if (!"interviewer".equalsIgnoreCase(
-                interviewer.getRole()
-        )) {
-
-            throw new RuntimeException(
-                    "Only interviewers can submit candidate scores"
-            );
-        }
-
-
-        // Score validation
-
-        if (score == null || score < 0 || score > 100) {
-
-            throw new RuntimeException(
-                    "Score must be between 0 and 100"
-            );
-        }
-
-
-        // Find interview
-
-        Interview interview =
-                interviewRepository.findByRoomId(roomId)
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Interview room not found"
-                                )
-                        );
-
-
-        // Ownership validation
-
-        if (!interviewer.getId().equals(
-                interview.getInterviewerId()
-        )) {
-
-            throw new RuntimeException(
-                    "You are not the interviewer of this room"
-            );
-        }
-
-
-        // Interview status validation
-
-        if (!"COMPLETED".equalsIgnoreCase(
-                interview.getStatus()
-        )) {
-
-            throw new RuntimeException(
-                    "Interview must be completed before submitting evaluation"
-            );
-        }
-
-
-        // Save candidate score
-
-        interview.setCandidateScore(score);
-
-        interview.setUpdatedAt(
-                LocalDateTime.now()
-        );
-
-
-        // Save
-
-        return interviewRepository.save(
-                interview
-        );
+        submitScore(roomId, score);
+        return interviewRepository.findByRoomId(roomId)
+                .orElseThrow(() -> new ApiException("Interview room not found", HttpStatus.NOT_FOUND));
     }
 
-    // Submit interviewer score
-
+    // Submit interviewer score (legacy method)
     public Interview submitInterviewerScore(
             String roomId,
             Integer score
     ) {
-
-        // Get logged-in user
-
-        User candidate =
-                userService.getLoggedInUser();
-
-
-        // Role validation
-
-        if (!"candidate".equalsIgnoreCase(
-                candidate.getRole()
-        )) {
-
-            throw new RuntimeException(
-                    "Only candidates can submit interviewer scores"
-            );
-        }
-
-
-        // Score validation
-
-        if (score == null || score < 0 || score > 100) {
-
-            throw new RuntimeException(
-                    "Score must be between 0 and 100"
-            );
-        }
-
-
-        // Find interview
-
-        Interview interview =
-                interviewRepository.findByRoomId(roomId)
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Interview room not found"
-                                )
-                        );
-
-
-        // Ownership validation
-
-        if (!candidate.getId().equals(
-                interview.getCandidateId()
-        )) {
-
-            throw new RuntimeException(
-                    "You are not the candidate assigned to this room"
-            );
-        }
-
-
-        // Interview status validation
-
-        if (!"COMPLETED".equalsIgnoreCase(
-                interview.getStatus()
-        )) {
-
-            throw new RuntimeException(
-                    "Interview must be completed before submitting evaluation"
-            );
-        }
-
-
-        // Save interviewer score
-
-        interview.setInterviewerScore(score);
-
-        interview.setUpdatedAt(
-                LocalDateTime.now()
-        );
-
-
-        // Save
-
-        return interviewRepository.save(
-                interview
-        );
+        submitScore(roomId, score);
+        return interviewRepository.findByRoomId(roomId)
+                .orElseThrow(() -> new ApiException("Interview room not found", HttpStatus.NOT_FOUND));
     }
 
     // History
@@ -665,54 +782,9 @@ public class InterviewService {
             String roomId,
             Integer score
     ) {
-
-        // Get interviewer
-        User interviewer =
-                userService.getLoggedInUser();
-
-        // Role validation
-        if (!"interviewer".equalsIgnoreCase(
-                interviewer.getRole()
-        )) {
-            throw new RuntimeException(
-                    "Only interviewers can score candidates"
-            );
-        }
-
-        // Validate score
-        if (score == null || score < 0 || score > 100) {
-            throw new RuntimeException(
-                    "Score must be between 0 and 100"
-            );
-        }
-
-        // Find interview
-        Interview interview =
-                interviewRepository.findByRoomId(roomId)
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Interview room not found"
-                                )
-                        );
-
-        // Ownership validation
-        if (!interviewer.getId().equals(
-                interview.getInterviewerId()
-        )) {
-            throw new RuntimeException(
-                    "You are not the interviewer of this room"
-            );
-        }
-
-        // Set score
-        interview.setCandidateScore(score);
-
-        interview.setUpdatedAt(
-                LocalDateTime.now()
-        );
-
-        // Save
-        return interviewRepository.save(interview);
+        submitScore(roomId, score);
+        return interviewRepository.findByRoomId(roomId)
+                .orElseThrow(() -> new ApiException("Interview room not found", HttpStatus.NOT_FOUND));
     }
 
 
@@ -721,54 +793,9 @@ public class InterviewService {
             String roomId,
             Integer score
     ) {
-
-        // Get candidate
-        User candidate =
-                userService.getLoggedInUser();
-
-        // Role validation
-        if (!"candidate".equalsIgnoreCase(
-                candidate.getRole()
-        )) {
-            throw new RuntimeException(
-                    "Only candidates can score interviewers"
-            );
-        }
-
-        // Validate score
-        if (score == null || score < 0 || score > 100) {
-            throw new RuntimeException(
-                    "Score must be between 0 and 100"
-            );
-        }
-
-        // Find interview
-        Interview interview =
-                interviewRepository.findByRoomId(roomId)
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Interview room not found"
-                                )
-                        );
-
-        // Ownership validation
-        if (!candidate.getId().equals(
-                interview.getCandidateId()
-        )) {
-            throw new RuntimeException(
-                    "You are not the candidate of this room"
-            );
-        }
-
-        // Set score
-        interview.setInterviewerScore(score);
-
-        interview.setUpdatedAt(
-                LocalDateTime.now()
-        );
-
-        // Save
-        return interviewRepository.save(interview);
+        submitScore(roomId, score);
+        return interviewRepository.findByRoomId(roomId)
+                .orElseThrow(() -> new ApiException("Interview room not found", HttpStatus.NOT_FOUND));
     }
 
     public static final String DEFAULT_JAVA_TEMPLATE =

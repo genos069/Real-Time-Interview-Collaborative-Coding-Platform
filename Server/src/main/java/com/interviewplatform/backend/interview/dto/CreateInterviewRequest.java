@@ -12,6 +12,8 @@ public class CreateInterviewRequest {
 
     private String candidateId;
 
+    private String candidateEmail;
+
     private String candidateNotes;
 
 
@@ -53,6 +55,14 @@ public class CreateInterviewRequest {
 
     public void setCandidateId(String candidateId) {
         this.candidateId = candidateId;
+    }
+
+    public String getCandidateEmail() {
+        return candidateEmail;
+    }
+
+    public void setCandidateEmail(String candidateEmail) {
+        this.candidateEmail = candidateEmail;
     }
 
     public String getCandidateNotes() {

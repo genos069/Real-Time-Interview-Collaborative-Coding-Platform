@@ -7,9 +7,15 @@ import {
   getInterviewCodeSnapshot,
   runInterviewCode,
   getInterviewRoom,
+  finishInterviewRoom,
+  submitInterviewScore,
+  getInterviewScores,
   type InterviewDetailsResponse,
   type CodeSyncMessage,
   type RunInterviewCodeResponse,
+  type InterviewEventMessage,
+  type InterviewScoreRecord,
+  type InterviewRoomScoresResponse,
 } from "../../services/interviewRoomService";
 import {
   Mic, MicOff, Video, VideoOff, Monitor, MonitorOff, Hand, Maximize2, Minimize2,
@@ -17,7 +23,7 @@ import {
   Map, WrapText, Wifi, Clock, Terminal, CheckCircle2,
   Keyboard, X, Blend, Copy, ChevronRight, PenLine, Eraser, Minus,
   Square, Circle, Undo2, Trash2, Palette, MoreVertical, Loader2,
-  ShieldAlert, LogOut,
+  ShieldAlert, LogOut, Star,
 } from "lucide-react";
 
 /* ─── constants ─── */
@@ -194,35 +200,17 @@ export interface RoomParticipant {
 /* ─── Navbar ─── */
 function Navbar({
   timer,
-  onLeave,
-  presenceStatus = "Connecting",
-  presenceMessages = [],
+  onFinishInterview,
+  isInterviewer = false,
+  isFinishing = false,
   participants = [],
 }: {
   timer: string;
-  onLeave: () => void;
-  presenceStatus?: string;
-  presenceMessages?: PresenceMessage[];
+  onFinishInterview?: () => void;
+  isInterviewer?: boolean;
+  isFinishing?: boolean;
   participants?: RoomParticipant[];
 }) {
-  const [showPresence, setShowPresence] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!showPresence) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setShowPresence(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showPresence]);
-
-  const isConnected = presenceStatus === "Connected";
-  const statusColor = isConnected ? C.emerald : presenceStatus === "Connecting" ? C.amber : C.rose;
-  const statusLabel = isConnected ? "STOMP Connected" : (presenceStatus ? `STOMP: ${presenceStatus}` : "STOMP Disconnected");
-
   const count = participants.length;
   const countLabel = `${count} ${count === 1 ? "participant" : "participants"}`;
 
@@ -284,81 +272,45 @@ function Navbar({
           </div>
           <span style={{ color: C.ts, fontSize: 11, fontWeight: 500 }}>{countLabel}</span>
         </div>
-        <div ref={dropdownRef} style={{ position: "relative" }}>
-          <button
-            onClick={() => setShowPresence(v => !v)}
-            title="STOMP presence status (click to toggle recent events)"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              background: `${statusColor}18`,
-              color: statusColor,
-              border: `1px solid ${statusColor}35`,
-              borderRadius: 20,
-              padding: "3px 10px",
-              fontSize: 11,
-              fontWeight: 600,
-              cursor: "pointer",
-              fontFamily: INTER,
-              transition: "all 0.15s",
-            }}
-          >
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: statusColor }} />
-            <span>{statusLabel}</span>
-            {presenceMessages.length > 0 && (
-              <span style={{ fontSize: 9, background: `${statusColor}25`, borderRadius: 10, padding: "1px 5px", fontFamily: MONO }}>
-                {presenceMessages.length}
-              </span>
-            )}
-            <ChevronDown size={10} style={{ transform: showPresence ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
-          </button>
-
-          {showPresence && (
-            <div style={{
-              position: "absolute",
-              top: 32,
-              right: 0,
-              zIndex: 70,
-              minWidth: 220,
-              maxWidth: 320,
-              background: "rgba(15,23,42,0.96)",
-              backdropFilter: "blur(20px)",
-              border: `1px solid ${C.border}`,
-              borderRadius: 10,
-              padding: "8px 12px",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
-              fontFamily: MONO,
-              fontSize: 10,
-              color: C.ts,
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, color: C.tp, fontWeight: 600 }}>
-                <span>STOMP presence</span>
-                <span style={{ color: statusColor }}>{presenceStatus}</span>
-              </div>
-              {presenceMessages.length === 0 ? (
-                <div style={{ color: C.tm }}>No recent events</div>
-              ) : (
-                presenceMessages.slice(-5).map((presence, idx) => (
-                  <div key={`${presence.userId}-${presence.event}-${idx}`} style={{ color: C.emerald, marginTop: 3 }}>
-                    {presence.role} {presence.event.toLowerCase()} ({presence.userId})
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
       </div>
 
-      {/* Leave */}
-      <button
-        onClick={onLeave}
-        style={{ display: "flex", alignItems: "center", gap: 6, background: `${C.rose}18`, border: `1px solid ${C.rose}40`, borderRadius: 9, padding: "5px 12px", color: C.rose, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: INTER, transition: "background 0.15s" }}
-        onMouseEnter={e => (e.currentTarget.style.background = `${C.rose}30`)}
-        onMouseLeave={e => (e.currentTarget.style.background = `${C.rose}18`)}
-      >
-        <PhoneOff size={13} /> Leave
-      </button>
+      {/* Finish Interview (Only rendered for the Interviewer) */}
+      {isInterviewer && onFinishInterview && (
+        <button
+          onClick={onFinishInterview}
+          disabled={isFinishing}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            background: isFinishing ? `${C.rose}10` : `${C.rose}18`,
+            border: `1px solid ${isFinishing ? `${C.rose}25` : `${C.rose}40`}`,
+            borderRadius: 9,
+            padding: "5px 12px",
+            color: C.rose,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: isFinishing ? "not-allowed" : "pointer",
+            fontFamily: INTER,
+            opacity: isFinishing ? 0.75 : 1,
+            transition: "all 0.15s",
+          }}
+          onMouseEnter={e => {
+            if (!isFinishing) e.currentTarget.style.background = `${C.rose}30`;
+          }}
+          onMouseLeave={e => {
+            if (!isFinishing) e.currentTarget.style.background = `${C.rose}18`;
+          }}
+          title={isFinishing ? "Finishing interview..." : "Finish Interview"}
+        >
+          {isFinishing ? (
+            <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
+          ) : (
+            <PhoneOff size={13} />
+          )}
+          <span>{isFinishing ? "Finishing..." : "Finish Interview"}</span>
+        </button>
+      )}
     </nav>
   );
 }
@@ -1749,7 +1701,7 @@ function VideoPanel({
           <div style={{ width: 38, height: 38, borderRadius: 11, background: C.rose, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 4px 14px ${C.rose}50` }}>
             <PhoneOff size={16} color="#fff" />
           </div>
-          <span style={{ fontSize: 9, fontWeight: 600, color: C.rose }}>End</span>
+          <span style={{ fontSize: 9, fontWeight: 600, color: C.rose }}>Leave</span>
         </button>
       </GlassCard>
     </div>
@@ -3066,6 +3018,281 @@ function ShortcutModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function ScoreModalDialog({
+  open,
+  onClose,
+  isInterviewer,
+  isCandidate,
+  hasAlreadyScored,
+  submittedScore,
+  alreadySubmittedScore,
+  scoreInput,
+  onScoreInputChange,
+  scoreValidationError,
+  scoreSubmitError,
+  isSubmittingScore,
+  onSubmit,
+  onNavigateDashboard,
+}: {
+  open: boolean;
+  onClose: () => void;
+  isInterviewer: boolean;
+  isCandidate: boolean;
+  hasAlreadyScored: boolean;
+  submittedScore: number | null;
+  alreadySubmittedScore: number | null;
+  scoreInput: string;
+  onScoreInputChange: (val: string) => void;
+  scoreValidationError: string | null;
+  scoreSubmitError: string | null;
+  isSubmittingScore: boolean;
+  onSubmit: (e?: React.FormEvent) => void;
+  onNavigateDashboard: () => void;
+}) {
+  if (!open) return null;
+  const isDone = hasAlreadyScored || submittedScore != null;
+  const currentScoreVal = submittedScore ?? alreadySubmittedScore;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 99999,
+        background: "rgba(15,23,42,0.85)",
+        backdropFilter: "blur(20px)",
+        WebkitBackdropFilter: "blur(20px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+        fontFamily: INTER,
+      }}
+    >
+      <div
+        style={{
+          background: C.surface,
+          border: `1px solid ${C.border}`,
+          borderRadius: 20,
+          padding: "36px 32px",
+          maxWidth: 440,
+          width: "100%",
+          textAlign: "center",
+          boxShadow: "0 25px 70px rgba(0,0,0,0.6)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 20,
+        }}
+      >
+        <div
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: "50%",
+            background: isDone
+              ? "rgba(16,185,129,0.12)"
+              : "rgba(59,130,246,0.12)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {isDone ? (
+            <CheckCircle2 size={30} color={C.emerald} />
+          ) : (
+            <Star size={28} color={C.blue} />
+          )}
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <h2 style={{ color: C.tp, fontSize: 20, fontWeight: 700 }}>
+            Interview Complete
+          </h2>
+          <p style={{ color: C.ts, fontSize: 14 }}>
+            {isDone
+              ? "Your score has been recorded."
+              : isInterviewer
+              ? "Rate the Candidate"
+              : "Rate the Interviewer"}
+          </p>
+        </div>
+
+        {isDone ? (
+          <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 16, alignItems: "center" }}>
+            <div
+              style={{
+                background: "rgba(16,185,129,0.1)",
+                border: "1px solid rgba(16,185,129,0.25)",
+                borderRadius: 14,
+                padding: "16px 20px",
+                width: "100%",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <span style={{ color: C.ts, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>
+                Score Submitted
+              </span>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+                <span style={{ color: C.emerald, fontSize: 32, fontWeight: 800, fontFamily: MONO }}>
+                  {currentScoreVal}
+                </span>
+                <span style={{ color: C.tm, fontSize: 16, fontWeight: 600 }}>/ 100</span>
+              </div>
+              <span style={{ color: C.ts, fontSize: 12 }}>
+                {isInterviewer
+                  ? "Thank you for evaluating this candidate."
+                  : "Thank you for rating your interviewer."}
+              </span>
+            </div>
+
+            <button
+              onClick={onNavigateDashboard}
+              style={{
+                width: "100%",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                padding: "12px 24px",
+                borderRadius: 12,
+                border: "none",
+                background: C.blue,
+                color: "#fff",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+                transition: "opacity 0.2s",
+              }}
+              onMouseEnter={e => (e.currentTarget.style.opacity = "0.9")}
+              onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
+            >
+              <LogOut size={16} />
+              Return to Dashboard
+            </button>
+          </div>
+        ) : (
+          <form
+            onSubmit={onSubmit}
+            style={{ width: "100%", display: "flex", flexDirection: "column", gap: 16, alignItems: "center" }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%" }}>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                autoFocus
+                placeholder="85"
+                value={scoreInput}
+                disabled={isSubmittingScore}
+                onChange={(e) => onScoreInputChange(e.target.value)}
+                style={{
+                  width: 110,
+                  height: 52,
+                  textAlign: "center",
+                  fontSize: 24,
+                  fontWeight: 700,
+                  fontFamily: MONO,
+                  color: C.tp,
+                  background: C.elevated,
+                  border: `1px solid ${scoreValidationError ? C.rose : C.border}`,
+                  borderRadius: 12,
+                  outline: "none",
+                  transition: "border-color 0.2s",
+                }}
+                onFocus={e => (e.currentTarget.style.borderColor = scoreValidationError ? C.rose : C.blue)}
+                onBlur={e => (e.currentTarget.style.borderColor = scoreValidationError ? C.rose : C.border)}
+              />
+              <span style={{ color: C.ts, fontSize: 18, fontWeight: 600 }}>/ 100</span>
+            </div>
+
+            {(scoreValidationError || scoreSubmitError) && (
+              <div
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  background: "rgba(244,63,94,0.12)",
+                  border: "1px solid rgba(244,63,94,0.3)",
+                  color: "#FDA4AF",
+                  fontSize: 12,
+                  lineHeight: 1.4,
+                  textAlign: "center",
+                }}
+              >
+                {scoreValidationError || scoreSubmitError}
+              </div>
+            )}
+
+            <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+              <button
+                type="submit"
+                disabled={isSubmittingScore}
+                style={{
+                  width: "100%",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  padding: "12px 24px",
+                  borderRadius: 12,
+                  border: "none",
+                  background: C.blue,
+                  color: "#fff",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: isSubmittingScore ? "not-allowed" : "pointer",
+                  opacity: isSubmittingScore ? 0.7 : 1,
+                  transition: "opacity 0.2s",
+                }}
+                onMouseEnter={e => {
+                  if (!isSubmittingScore) e.currentTarget.style.opacity = "0.9";
+                }}
+                onMouseLeave={e => {
+                  if (!isSubmittingScore) e.currentTarget.style.opacity = "1";
+                }}
+              >
+                {isSubmittingScore ? (
+                  <>
+                    <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
+                    Submitting...
+                  </>
+                ) : (
+                  "Submit Score"
+                )}
+              </button>
+
+              <button
+                type="button"
+                disabled={isSubmittingScore}
+                onClick={onNavigateDashboard}
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  background: "transparent",
+                  border: "none",
+                  color: C.tm,
+                  fontSize: 12,
+                  cursor: "pointer",
+                  transition: "color 0.2s",
+                }}
+                onMouseEnter={e => (e.currentTarget.style.color = C.ts)}
+                onMouseLeave={e => (e.currentTarget.style.color = C.tm)}
+              >
+                Skip & Return to Dashboard
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Root ─── */
 export default function InterviewRoom() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -3077,7 +3304,7 @@ export default function InterviewRoom() {
 
   const globalRole = getUserRole();
   const [currentUser, setCurrentUser] = useState<User | null>(() => getUser());
-  const [roomAuthStatus, setRoomAuthStatus] = useState<"verifying" | "authorized" | "unauthorized" | "not_found" | "error">("verifying");
+  const [roomAuthStatus, setRoomAuthStatus] = useState<"verifying" | "authorized" | "unauthorized" | "not_found" | "completed" | "error">("verifying");
   const [roomAuthError, setRoomAuthError] = useState<string | null>(null);
   const [interviewRecord, setInterviewRecord] = useState<InterviewDetailsResponse | null>(null);
   const [roomRole, setRoomRole] = useState<"Interviewer" | "Candidate" | "Observer" | null>(null);
@@ -3085,6 +3312,78 @@ export default function InterviewRoom() {
   const currentUserId = currentUser?.id || currentUser?._id || currentUser?.userId;
   const currentUserName = currentUser?.name?.trim();
   const isCandidate = roomRole ? roomRole === "Candidate" : globalRole === "candidate";
+  const isInterviewer = roomRole === "Interviewer" || (!roomRole && globalRole === "interviewer");
+  const [isFinishing, setIsFinishing] = useState(false);
+  const [finishError, setFinishError] = useState<string | null>(null);
+  const [completionNotice, setCompletionNotice] = useState<{
+    show: boolean;
+    title: string;
+    message: string;
+  } | null>(null);
+  const isTerminatedRef = useRef(false);
+
+  // Mutual Scoring State
+  const [scoreModalOpen, setScoreModalOpen] = useState(false);
+  const [scoreInput, setScoreInput] = useState("");
+  const [scoreValidationError, setScoreValidationError] = useState<string | null>(null);
+  const [scoreSubmitError, setScoreSubmitError] = useState<string | null>(null);
+  const [isSubmittingScore, setIsSubmittingScore] = useState(false);
+  const [submittedScore, setSubmittedScore] = useState<number | null>(null);
+  const [hasAlreadyScored, setHasAlreadyScored] = useState(false);
+  const [alreadySubmittedScore, setAlreadySubmittedScore] = useState<number | null>(null);
+
+  const validateScoreInput = (raw: string): { valid: boolean; error?: string; value?: number } => {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return { valid: false, error: "Please enter a score." };
+    }
+    if (!/^-?\d+$/.test(trimmed)) {
+      if (/^-?\d+\.\d+$/.test(trimmed)) {
+        return { valid: false, error: "Decimal scores are not allowed. Please enter an integer from 0 to 100." };
+      }
+      return { valid: false, error: "Invalid score. Please enter a whole number from 0 to 100." };
+    }
+    const num = Number(trimmed);
+    if (isNaN(num)) {
+      return { valid: false, error: "Score must be a number." };
+    }
+    if (num < 0 || num > 100) {
+      return { valid: false, error: "Score must be between 0 and 100." };
+    }
+    return { valid: true, value: num };
+  };
+
+  const handleScoreSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (isSubmittingScore || hasAlreadyScored || submittedScore != null || !roomId) {
+      return;
+    }
+    setScoreValidationError(null);
+    setScoreSubmitError(null);
+
+    const validation = validateScoreInput(scoreInput);
+    if (!validation.valid || validation.value === undefined) {
+      setScoreValidationError(validation.error || "Invalid score.");
+      return;
+    }
+
+    setIsSubmittingScore(true);
+    try {
+      await submitInterviewScore(roomId, validation.value);
+      setSubmittedScore(validation.value);
+      setHasAlreadyScored(true);
+      setAlreadySubmittedScore(validation.value);
+    } catch (err: any) {
+      console.error("Failed to submit score:", err);
+      const msg =
+        err?.response?.data?.message ||
+        err?.message ||
+        "Failed to submit score. Please try again.";
+      setScoreSubmitError(msg);
+    } finally {
+      setIsSubmittingScore(false);
+    }
+  };
 
   const [mic, setMic] = useState(true);
   const [cam, setCam] = useState(true);
@@ -3150,6 +3449,37 @@ export default function InterviewRoom() {
         if (!active) return;
 
         setInterviewRecord(roomData);
+
+        if (roomData.status === "COMPLETED") {
+          const uid = usr?.id || usr?.userId;
+          let assignedRole: "Interviewer" | "Candidate" | "Observer" | null = null;
+          if (uid && roomData.interviewerId && uid === roomData.interviewerId) {
+            assignedRole = "Interviewer";
+          } else if (uid && roomData.candidateId && uid === roomData.candidateId) {
+            assignedRole = "Candidate";
+          } else if (uid && roomData.observerId && uid === roomData.observerId) {
+            assignedRole = "Observer";
+          }
+          if (assignedRole) {
+            setRoomRole(assignedRole);
+          }
+          setRoomAuthStatus("completed");
+          setRoomAuthError("This interview has been completed and is no longer active.");
+
+          // Check if user has already scored
+          try {
+            const scoresData = await getInterviewScores(roomId);
+            const isCand = assignedRole ? assignedRole === "Candidate" : globalRole === "candidate";
+            const myScore = isCand ? scoresData.interviewerScore : scoresData.candidateScore;
+            if (myScore != null) {
+              setHasAlreadyScored(true);
+              setAlreadySubmittedScore(myScore);
+            }
+          } catch (e) {
+            console.warn("Could not check scores for completed room:", e);
+          }
+          return;
+        }
 
         const uid = usr?.id || usr?.userId;
         let assignedRole: "Interviewer" | "Candidate" | "Observer" | null = null;
@@ -3430,6 +3760,7 @@ export default function InterviewRoom() {
   };
 
   const handleLeave = () => {
+    isTerminatedRef.current = true;
     if (stompClientRef.current?.connected && roomId) {
       try {
         stompClientRef.current.publish({
@@ -3462,6 +3793,130 @@ export default function InterviewRoom() {
     setRaisedHands({ candidate: false, interviewer: false });
     navigate(isCandidate ? "/candidate" : "/interviewer");
   };
+
+  const handleFinishInterview = async () => {
+    if (isFinishing || !roomId || isCandidate || isTerminatedRef.current) return;
+    setIsFinishing(true);
+    setFinishError(null);
+
+    try {
+      const response = await finishInterviewRoom(roomId);
+      if (response && response.status === "COMPLETED") {
+        isTerminatedRef.current = true;
+        if (stompClientRef.current?.connected && roomId) {
+          try {
+            stompClientRef.current.publish({
+              destination: `/app/interview/${roomId}/leave`,
+              body: JSON.stringify({}),
+            });
+          } catch (e) {
+            console.warn("Could not publish leave message:", e);
+          }
+        }
+        if (screenStreamRef.current) {
+          screenStreamRef.current.getTracks().forEach(t => t.stop());
+          screenStreamRef.current = null;
+        }
+        screenStream?.getTracks().forEach(t => t.stop());
+        localStreamRef.current?.getTracks().forEach(t => t.stop());
+        if (peerConnectionRef.current) {
+          peerConnectionRef.current.onicecandidate = null;
+          peerConnectionRef.current.ontrack = null;
+          peerConnectionRef.current.close();
+          peerConnectionRef.current = null;
+        }
+        remoteStreamRef.current = null;
+        setRemoteStream(null);
+        remoteIceQueueRef.current = [];
+        localIceQueueRef.current = [];
+        mediaAcquisitionPromiseRef.current = null;
+        hasCandidateJoinedRef.current = false;
+        stompClientRef.current = null;
+        setRaisedHands({ candidate: false, interviewer: false });
+
+        // Open mutual scoring modal for interviewer
+        try {
+          const scoresData = await getInterviewScores(roomId);
+          if (scoresData.candidateScore != null) {
+            setHasAlreadyScored(true);
+            setAlreadySubmittedScore(scoresData.candidateScore);
+          }
+        } catch (e) {
+          console.warn("Could not check scores on finish:", e);
+        }
+        setScoreModalOpen(true);
+      } else {
+        setFinishError("Interview status was not updated to completed. Please try again.");
+        setIsFinishing(false);
+      }
+    } catch (err: any) {
+      console.error("Failed to finish interview:", err);
+      const msg = err?.response?.data?.message || err?.message || "Failed to finish interview. Please try again.";
+      setFinishError(msg);
+      setIsFinishing(false);
+    }
+  };
+
+  const handleRemoteInterviewCompleted = useCallback((eventMsg?: InterviewEventMessage) => {
+    if (isTerminatedRef.current) return;
+    isTerminatedRef.current = true;
+
+    // Interviewer already handles termination via REST response flow
+    if (!isCandidate) {
+      return;
+    }
+
+    console.info("Candidate processing remote interview completion event:", eventMsg);
+
+    // 1. Immediately stop local audio, video, and screen sharing tracks
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(t => t.stop());
+      screenStreamRef.current = null;
+    }
+    screenStream?.getTracks().forEach(t => t.stop());
+    localStreamRef.current?.getTracks().forEach(t => t.stop());
+
+    // 2. Close WebRTC peer connection
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.onicecandidate = null;
+      peerConnectionRef.current.ontrack = null;
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+
+    // 3. Clear remote media state
+    remoteStreamRef.current = null;
+    setRemoteStream(null);
+    remoteIceQueueRef.current = [];
+    localIceQueueRef.current = [];
+    mediaAcquisitionPromiseRef.current = null;
+    hasCandidateJoinedRef.current = false;
+
+    // 4. Disconnect STOMP
+    if (stompClientRef.current) {
+      try {
+        stompClientRef.current.deactivate();
+      } catch (err) {
+        console.warn("Error deactivating STOMP client on remote completion:", err);
+      }
+      stompClientRef.current = null;
+    }
+
+    setRaisedHands({ candidate: false, interviewer: false });
+
+    // 5. Open mutual scoring modal for Candidate
+    if (roomId) {
+      void getInterviewScores(roomId).then(scoresData => {
+        if (scoresData.interviewerScore != null) {
+          setHasAlreadyScored(true);
+          setAlreadySubmittedScore(scoresData.interviewerScore);
+        }
+      }).catch(err => {
+        console.warn("Could not check scores on remote completion:", err);
+      });
+    }
+    setScoreModalOpen(true);
+  }, [isCandidate, roomId, screenStream]);
 
   useEffect(() => {
     if (roomAuthStatus !== "authorized") return;
@@ -3908,12 +4363,28 @@ export default function InterviewRoom() {
           },
         );
 
+        const eventsSub = client.subscribe(
+          `/topic/interview/${roomId}/events`,
+          (message) => {
+            try {
+              const eventMsg = JSON.parse(message.body) as InterviewEventMessage;
+              console.info("Interview room event received:", eventMsg);
+              if (eventMsg.event === "INTERVIEW_COMPLETED" || eventMsg.status === "COMPLETED") {
+                handleRemoteInterviewCompleted(eventMsg);
+              }
+            } catch (err) {
+              console.error("Unable to parse interview event message", err);
+            }
+          },
+        );
+
         unsubscribe = () => {
           presenceSub.unsubscribe();
           signalSub.unsubscribe();
           codeSub.unsubscribe();
           chatSub.unsubscribe();
           whiteboardSub.unsubscribe();
+          eventsSub.unsubscribe();
         };
 
         // Flush any queued local ICE candidates that were collected prior to connect
@@ -4097,11 +4568,20 @@ export default function InterviewRoom() {
   }
 
   if (roomAuthStatus !== "authorized") {
+    const isCompleted = roomAuthStatus === "completed";
     const isForbidden = roomAuthStatus === "unauthorized";
     const isNotFound = roomAuthStatus === "not_found";
-    const title = isForbidden ? "Access Denied" : isNotFound ? "Room Not Found" : "Unable to Join Room";
+    const title = isCompleted
+      ? "Interview Completed"
+      : isForbidden
+      ? "Access Denied"
+      : isNotFound
+      ? "Room Not Found"
+      : "Unable to Join Room";
     const description = roomAuthError || (
-      isForbidden
+      isCompleted
+        ? "This interview session has been ended and is no longer active."
+        : isForbidden
         ? "You are not a participant of this interview room."
         : isNotFound
         ? "The interview room does not exist or has already closed."
@@ -4112,7 +4592,7 @@ export default function InterviewRoom() {
       <div style={{ height: "100dvh", background: C.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: INTER, padding: 20 }}>
         <div style={{
           background: C.surface,
-          border: `1px solid ${isForbidden ? "rgba(244,63,94,0.3)" : C.border}`,
+          border: `1px solid ${isCompleted ? "rgba(16,185,129,0.3)" : isForbidden ? "rgba(244,63,94,0.3)" : C.border}`,
           borderRadius: 20,
           padding: "36px 32px",
           maxWidth: 440,
@@ -4128,19 +4608,68 @@ export default function InterviewRoom() {
             width: 56,
             height: 56,
             borderRadius: "50%",
-            background: isForbidden ? "rgba(244,63,94,0.12)" : "rgba(245,158,11,0.12)",
+            background: isCompleted ? "rgba(16,185,129,0.12)" : isForbidden ? "rgba(244,63,94,0.12)" : "rgba(245,158,11,0.12)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
           }}>
-            <ShieldAlert size={28} color={isForbidden ? C.rose : C.amber} />
+            {isCompleted ? (
+              <CheckCircle2 size={28} color={C.emerald} />
+            ) : (
+              <ShieldAlert size={28} color={isForbidden ? C.rose : C.amber} />
+            )}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <h2 style={{ color: C.tp, fontSize: 20, fontWeight: 700 }}>{title}</h2>
             <p style={{ color: C.ts, fontSize: 13, lineHeight: 1.5 }}>{description}</p>
           </div>
+          {isCompleted && (hasAlreadyScored || submittedScore != null) && (
+            <div
+              style={{
+                background: "rgba(16,185,129,0.12)",
+                border: "1px solid rgba(16,185,129,0.3)",
+                borderRadius: 12,
+                padding: "8px 16px",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <CheckCircle2 size={16} color={C.emerald} />
+              <span style={{ color: C.tp, fontSize: 13, fontWeight: 600 }}>
+                Score Submitted: {submittedScore ?? alreadySubmittedScore}/100
+              </span>
+            </div>
+          )}
+
+          {isCompleted && !hasAlreadyScored && submittedScore == null && (
+            <button
+              onClick={() => setScoreModalOpen(true)}
+              style={{
+                marginTop: 4,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 20px",
+                borderRadius: 10,
+                border: "none",
+                background: C.emerald,
+                color: "#fff",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                transition: "opacity 0.2s",
+              }}
+              onMouseEnter={e => (e.currentTarget.style.opacity = "0.9")}
+              onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
+            >
+              <Star size={15} />
+              {isCandidate ? "Rate the Interviewer" : "Rate the Candidate"}
+            </button>
+          )}
+
           <button
-            onClick={() => navigate(globalRole === "candidate" ? "/candidate" : "/interviewer")}
+            onClick={() => navigate(isCandidate ? "/candidate" : "/interviewer")}
             style={{
               marginTop: 8,
               display: "inline-flex",
@@ -4163,6 +4692,27 @@ export default function InterviewRoom() {
             Return to Dashboard
           </button>
         </div>
+
+        <ScoreModalDialog
+          open={scoreModalOpen}
+          onClose={() => setScoreModalOpen(false)}
+          isInterviewer={isInterviewer}
+          isCandidate={isCandidate}
+          hasAlreadyScored={hasAlreadyScored}
+          submittedScore={submittedScore}
+          alreadySubmittedScore={alreadySubmittedScore}
+          scoreInput={scoreInput}
+          onScoreInputChange={(val) => {
+            setScoreInput(val);
+            setScoreValidationError(null);
+            setScoreSubmitError(null);
+          }}
+          scoreValidationError={scoreValidationError}
+          scoreSubmitError={scoreSubmitError}
+          isSubmittingScore={isSubmittingScore}
+          onSubmit={handleScoreSubmit}
+          onNavigateDashboard={() => navigate(isCandidate ? "/candidate" : "/interviewer")}
+        />
       </div>
     );
   }
@@ -4185,11 +4735,146 @@ export default function InterviewRoom() {
       <div ref={containerRef} data-room-id={roomId} style={{ height: "100dvh", background: C.bg, display: "flex", flexDirection: "column", overflow: "hidden", fontFamily: INTER }}>
         <Navbar
           timer={timer}
-          onLeave={handleLeave}
-          presenceStatus={presenceStatus}
-          presenceMessages={presenceMessages}
+          onFinishInterview={handleFinishInterview}
+          isInterviewer={isInterviewer}
+          isFinishing={isFinishing}
           participants={participantsList}
         />
+
+        {/* Real-time Completion Notification Modal for Candidate */}
+        {completionNotice?.show && (
+          <div style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 99999,
+            background: "rgba(15,23,42,0.85)",
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+            fontFamily: INTER,
+          }}>
+            <div style={{
+              background: C.surface,
+              border: `1px solid rgba(16,185,129,0.35)`,
+              borderRadius: 20,
+              padding: "36px 32px",
+              maxWidth: 440,
+              width: "100%",
+              textAlign: "center",
+              boxShadow: "0 25px 70px rgba(0,0,0,0.6)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 16,
+            }}>
+              <div style={{
+                width: 56,
+                height: 56,
+                borderRadius: "50%",
+                background: "rgba(16,185,129,0.12)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}>
+                <CheckCircle2 size={30} color={C.emerald} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <h2 style={{ color: C.tp, fontSize: 20, fontWeight: 700 }}>
+                  {completionNotice.title}
+                </h2>
+                <p style={{ color: C.ts, fontSize: 13, lineHeight: 1.6 }}>
+                  {completionNotice.message}
+                </p>
+              </div>
+              <button
+                onClick={() => navigate("/candidate")}
+                style={{
+                  marginTop: 8,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "10px 22px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: C.blue,
+                  color: "#fff",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "opacity 0.2s",
+                }}
+                onMouseEnter={e => (e.currentTarget.style.opacity = "0.9")}
+                onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
+              >
+                <LogOut size={15} />
+                Return to Dashboard
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Post-Interview Mutual Scoring Modal */}
+        <ScoreModalDialog
+          open={scoreModalOpen}
+          onClose={() => setScoreModalOpen(false)}
+          isInterviewer={isInterviewer}
+          isCandidate={isCandidate}
+          hasAlreadyScored={hasAlreadyScored}
+          submittedScore={submittedScore}
+          alreadySubmittedScore={alreadySubmittedScore}
+          scoreInput={scoreInput}
+          onScoreInputChange={(val) => {
+            setScoreInput(val);
+            setScoreValidationError(null);
+            setScoreSubmitError(null);
+          }}
+          scoreValidationError={scoreValidationError}
+          scoreSubmitError={scoreSubmitError}
+          isSubmittingScore={isSubmittingScore}
+          onSubmit={handleScoreSubmit}
+          onNavigateDashboard={() => navigate(isCandidate ? "/candidate" : "/interviewer")}
+        />
+
+        {finishError && (
+          <div style={{
+            position: "absolute",
+            top: 56,
+            right: 16,
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            background: "rgba(244,63,94,0.15)",
+            border: "1px solid rgba(244,63,94,0.4)",
+            borderRadius: 10,
+            padding: "8px 14px",
+            backdropFilter: "blur(12px)",
+            boxShadow: "0 8px 30px rgba(0,0,0,0.4)",
+            color: C.tp,
+            fontSize: 12,
+            fontFamily: INTER,
+          }}>
+            <ShieldAlert size={16} color={C.rose} />
+            <span>{finishError}</span>
+            <button
+              onClick={() => setFinishError(null)}
+              style={{
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                color: C.ts,
+                padding: 0,
+                display: "flex",
+                alignItems: "center",
+              }}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         {/* Body */}
         <div style={{ display: "flex", flex: 1, overflow: "hidden", padding: "62px 10px 10px 10px", gap: 10 }}>

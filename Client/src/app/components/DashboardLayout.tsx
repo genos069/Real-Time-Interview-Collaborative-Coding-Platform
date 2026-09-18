@@ -130,7 +130,7 @@ export function DashboardLayout({
               <Video className="w-3.5 h-3.5 text-[#0d1b2a]" />
             </div>
             <span className="text-white text-base" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 600 }}>
-              InterviewAI
+              CodeGear
             </span>
           </Link>
           <button className="lg:hidden text-white/50 hover:text-white" onClick={() => setSidebarOpen(false)}>

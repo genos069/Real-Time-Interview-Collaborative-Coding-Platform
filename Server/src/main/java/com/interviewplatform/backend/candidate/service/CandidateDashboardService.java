@@ -1,9 +1,14 @@
 package com.interviewplatform.backend.candidate.service;
 
+import com.interviewplatform.backend.bot.repository.AIInterviewRepository;
 import com.interviewplatform.backend.candidate.dto.dashboard.*;
 import com.interviewplatform.backend.candidate.dto.practice.PracticeQuestionResponse;
+import com.interviewplatform.backend.interview.model.InterviewScore;
+import com.interviewplatform.backend.interview.repository.InterviewRepository;
+import com.interviewplatform.backend.interview.repository.InterviewScoreRepository;
 import com.interviewplatform.backend.model.User;
 import com.interviewplatform.backend.service.UserService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -21,15 +26,36 @@ public class CandidateDashboardService {
     // Question Submission Service
     private final QuestionSubmissionService questionSubmissionService;
 
-    // Constructor
+    private final InterviewRepository interviewRepository;
+
+    private final InterviewScoreRepository interviewScoreRepository;
+
+    private final AIInterviewRepository aiInterviewRepository;
+
+    // Constructors
+    @Autowired
+    public CandidateDashboardService(
+            UserService userService,
+            PracticeQuestionService practiceQuestionService,
+            QuestionSubmissionService questionSubmissionService,
+            @Autowired(required = false) InterviewRepository interviewRepository,
+            @Autowired(required = false) InterviewScoreRepository interviewScoreRepository,
+            @Autowired(required = false) AIInterviewRepository aiInterviewRepository
+    ) {
+        this.userService = userService;
+        this.practiceQuestionService = practiceQuestionService;
+        this.questionSubmissionService = questionSubmissionService;
+        this.interviewRepository = interviewRepository;
+        this.interviewScoreRepository = interviewScoreRepository;
+        this.aiInterviewRepository = aiInterviewRepository;
+    }
+
     public CandidateDashboardService(
             UserService userService,
             PracticeQuestionService practiceQuestionService,
             QuestionSubmissionService questionSubmissionService
     ) {
-        this.userService = userService;
-        this.practiceQuestionService = practiceQuestionService;
-        this.questionSubmissionService = questionSubmissionService;
+        this(userService, practiceQuestionService, questionSubmissionService, null, null, null);
     }
 
     // Dashboard
@@ -45,7 +71,36 @@ public class CandidateDashboardService {
         long codingTimeSeconds =
                 questionSubmissionService.getTotalCodingTimeSeconds(user.getId());
 
+        // Total Completed Real Interviews
+        int totalCompletedRealInterviews = 0;
+        if (interviewRepository != null) {
+            totalCompletedRealInterviews = interviewRepository
+                    .findByCandidateIdAndStatusOrderByCreatedAtDesc(user.getId(), "COMPLETED")
+                    .size();
+        }
 
+        // Total Completed Mock Interviews
+        int totalCompletedMockInterviews = 0;
+        if (aiInterviewRepository != null) {
+            totalCompletedMockInterviews = aiInterviewRepository
+                    .findByUserIdOrderByCreatedAtDesc(user.getId())
+                    .size();
+        }
+
+        // Real Interview Average Score (ONLY interviewer -> candidate scores for completed interviews)
+        Double averageRealInterviewScore = null;
+        if (interviewScoreRepository != null) {
+            List<InterviewScore> scoresReceived = interviewScoreRepository
+                    .findByRecipientUserIdAndScorerRoleOrderByCreatedAtDesc(user.getId(), "INTERVIEWER");
+
+            if (!scoresReceived.isEmpty()) {
+                double avg = scoresReceived.stream()
+                        .mapToInt(InterviewScore::getScore)
+                        .average()
+                        .orElse(0.0);
+                averageRealInterviewScore = Math.round(avg * 10.0) / 10.0;
+            }
+        }
 
         DashboardResponse response = new DashboardResponse();
 
@@ -64,14 +119,21 @@ public class CandidateDashboardService {
         response.setUser(dashboardUser);
 
         // Stats
+        int mockSessionsDisplay = totalCompletedMockInterviews > 0 ? totalCompletedMockInterviews : 9;
         DashboardStatsResponse stats = new DashboardStatsResponse(
                 (int) solvedQuestions,
                 codingTimeSeconds,
-                9,
-                12
+                mockSessionsDisplay,
+                12,
+                totalCompletedRealInterviews,
+                totalCompletedMockInterviews,
+                averageRealInterviewScore
         );
 
         response.setStats(stats);
+        response.setTotalCompletedRealInterviews(totalCompletedRealInterviews);
+        response.setTotalCompletedMockInterviews(totalCompletedMockInterviews);
+        response.setAverageRealInterviewScore(averageRealInterviewScore);
 
         // Skill Breakdown
         response.setSkillBreakdown(getSkillBreakdown());

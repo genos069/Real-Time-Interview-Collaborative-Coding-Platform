@@ -58,10 +58,29 @@ public class SecurityConfig {
                         .requestMatchers("/api/history/**")
                         .authenticated()
 
+                        // Interviewer Dashboard APIs
+                        .requestMatchers("/api/interviewer/**")
+                        .hasRole("INTERVIEWER")
+
+                        // Mutual Interview Scoring APIs (Interviewer or Candidate)
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/api/interviews/score",
+                                "/api/interviews/*/score")
+                        .authenticated()
+
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/interviews/*/scores",
+                                "/api/interviews/scores/**")
+                        .authenticated()
+
                         // Interviewer Only APIs
                         .requestMatchers(
                                 HttpMethod.POST,
-                                "/api/interviews")
+                                "/api/interviews",
+                                "/api/interviews/*/finish",
+                                "/api/interviews/*/end")
                         .hasRole("INTERVIEWER")
 
                         .requestMatchers(

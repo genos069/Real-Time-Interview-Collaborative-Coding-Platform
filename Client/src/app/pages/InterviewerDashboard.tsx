@@ -1,9 +1,9 @@
 import {
   LayoutDashboard, PlusCircle, Video, User,
-  Clock, CheckCircle, Users, Calendar, ChevronRight,
-  BarChart2, TrendingUp, Edit3, Eye, Trash2, Copy,
+  Clock, CheckCircle, Users, Calendar,
+  TrendingUp, Edit3, Eye, Trash2, Copy,
   Camera, Mail, MapPin, Briefcase, Plus, X, Save,
-  Mic, MessageSquare,
+  Mic, Loader2, AlertCircle, CheckCircle2,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -12,37 +12,29 @@ import {
 import { DashboardLayout } from "../components/DashboardLayout";
 import { Link, useNavigate } from "react-router";
 import { useEffect, useState } from "react";
-import { getInterviewerDashboard } from "../../services/interviewerService";
 import {
   getCurrentInterviewRooms,
   startInterviewRoom,
+  createInterviewRoom,
+  getScoresReceived,
   type InterviewRoomRecord,
+  type CreateInterviewPayload,
+  type InterviewDetailsResponse,
+  type InterviewScoreRecord,
 } from "../../services/interviewRoomService";
+import {
+  getInterviewerDashboard,
+  getInterviewerProfile,
+  updateInterviewerProfile,
+  type InterviewerDashboardData,
+  type InterviewerProfile,
+} from "../../services/interviewerService";
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard className="w-4 h-4" /> },
   { id: "create", label: "Create Interview", icon: <PlusCircle className="w-4 h-4" /> },
   { id: "rooms", label: "Interview Rooms", icon: <Video className="w-4 h-4" /> },
   { id: "profile", label: "Profile", icon: <User className="w-4 h-4" /> },
-];
-
-const weeklyData = [
-  { day: "Mon", conducted: 2, scheduled: 1 },
-  { day: "Tue", conducted: 4, scheduled: 2 },
-  { day: "Wed", conducted: 1, scheduled: 3 },
-  { day: "Thu", conducted: 5, scheduled: 1 },
-  { day: "Fri", conducted: 3, scheduled: 2 },
-  { day: "Sat", conducted: 0, scheduled: 0 },
-  { day: "Sun", conducted: 1, scheduled: 0 },
-];
-
-const offerRateData = [
-  { month: "Jan", rate: 22 },
-  { month: "Feb", rate: 28 },
-  { month: "Mar", rate: 25 },
-  { month: "Apr", rate: 31 },
-  { month: "May", rate: 38 },
-  { month: "Jun", rate: 35 },
 ];
 
 const rooms = [
@@ -53,11 +45,14 @@ const rooms = [
   { id: "R-2903", title: "Product Engineer — Behavioral", candidate: "Ananya Gupta", role: "Product Engineer", date: "Jun 10, 2026 · 1:00 PM", status: "completed", duration: "35 min", score: 90 },
 ];
 
-const recentCandidates = [
-  { name: "David Kim", role: "Backend Engineer", score: 84, decision: "Advance", initials: "DK", color: "bg-blue-500" },
-  { name: "Sofia Rossi", role: "Data Engineer", score: 71, decision: "Hold", initials: "SR", color: "bg-violet-500" },
-  { name: "Ananya Gupta", role: "Product Engineer", score: 90, decision: "Advance", initials: "AG", color: "bg-emerald-500" },
-];
+function getShortLabel(name?: string): string {
+  if (!name || !name.trim()) return "Candidate";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length > 1) {
+    return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+  }
+  return name.length > 12 ? `${name.substring(0, 10)}...` : name;
+}
 
 function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
@@ -83,67 +78,256 @@ function StatCard({ icon, label, value, sub, dark }: { icon: React.ReactNode; la
 
 /* ── Dashboard ── */
 function DashboardSection() {
+  const [dashboardData, setDashboardData] = useState<InterviewerDashboardData | null>(null);
+  const [receivedScores, setReceivedScores] = useState<InterviewScoreRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const fetchMetrics = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const [data, scores] = await Promise.all([
+          getInterviewerDashboard(),
+          getScoresReceived().catch((err) => {
+            console.warn("Failed to load received interview scores:", err);
+            return [] as InterviewScoreRecord[];
+          }),
+        ]);
+        if (active) {
+          setDashboardData(data);
+          setReceivedScores(scores || []);
+        }
+      } catch (err: any) {
+        console.error("Failed to load interviewer dashboard:", err);
+        if (active) {
+          setError(err?.message || "Failed to load dashboard metrics.");
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    };
+    fetchMetrics();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const interviewsConducted = dashboardData ? String(dashboardData.interviewsConducted) : "0";
+  const candidatesReviewed = dashboardData ? String(dashboardData.candidatesReviewed) : "0";
+  const avgScore = dashboardData && dashboardData.averageScoreGiven != null
+    ? String(Math.round(dashboardData.averageScoreGiven))
+    : "N/A";
+
+  const reviews = dashboardData?.recentCandidateReviews && dashboardData.recentCandidateReviews.length > 0
+    ? dashboardData.recentCandidateReviews
+    : [];
+
+  // Map of scores given by candidates to this interviewer, keyed by roomId and interviewId
+  const receivedScoreMap = new Map<string, number>();
+  receivedScores.forEach((s) => {
+    if (s.roomId && s.score != null) {
+      receivedScoreMap.set(s.roomId, s.score);
+    }
+    if (s.interviewId && s.score != null) {
+      receivedScoreMap.set(s.interviewId, s.score);
+    }
+  });
+
+  // Chronological order (oldest to newest) for chart progression, limited to 6 most recent sessions
+  const chronologicalReviews = [...reviews].slice(0, 6).reverse();
+
+  // 1. Left Chart: Candidate Score vs Interviewer Score (Mutual Scores)
+  const mutualScoreData = chronologicalReviews.map((c) => {
+    const recScore = (c.roomId ? receivedScoreMap.get(c.roomId) : undefined)
+      ?? (c.interviewId ? receivedScoreMap.get(c.interviewId) : undefined);
+    return {
+      name: getShortLabel(c.candidateName || c.candidateEmail),
+      fullName: c.candidateName || c.candidateEmail || "Candidate",
+      candidateScore: c.score != null ? c.score : 0,
+      interviewerScore: recScore != null ? recScore : 0,
+      hasInterviewerScore: recScore != null,
+      role: c.targetRole || c.interviewTitle || "Interview",
+    };
+  });
+
+  // 2. Right Chart: Average Interview Score (Running average progression across evaluated candidates)
+  let cumulativeSum = 0;
+  const averageScoreData = chronologicalReviews.map((c, idx) => {
+    cumulativeSum += c.score != null ? c.score : 0;
+    const runningAvg = Math.round((cumulativeSum / (idx + 1)) * 10) / 10;
+    return {
+      name: getShortLabel(c.candidateName || c.candidateEmail),
+      fullName: c.candidateName || c.candidateEmail || "Candidate",
+      score: c.score != null ? c.score : 0,
+      average: runningAvg,
+    };
+  });
+
   return (
     <div>
-      <SectionHeader title="Overview" subtitle="This week you have conducted 16 sessions across 4 open roles." />
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard icon={<Video className="w-4.5 h-4.5" />} label="Interviews Conducted" value="47" sub="↑ 9 this month" />
-        <StatCard icon={<Users className="w-4.5 h-4.5" />} label="Candidates Reviewed" value="38" sub="5 pending" dark />
-        <StatCard icon={<TrendingUp className="w-4.5 h-4.5" />} label="Avg. Score Given" value="76" sub="Out of 100" />
-        <StatCard icon={<CheckCircle className="w-4.5 h-4.5" />} label="Offer Rate" value="35%" sub="↑ 7% vs last month" />
+      <SectionHeader title="Overview" subtitle="Track your conducted sessions, candidate reviews, and scoring performance." />
+      {error && (
+        <div className="flex items-center gap-2 p-3 mb-4 text-xs font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded-xl">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <StatCard
+          icon={<Video className="w-4.5 h-4.5" />}
+          label="Interviews Conducted"
+          value={loading ? "..." : interviewsConducted}
+          sub="Completed sessions"
+        />
+        <StatCard
+          icon={<Users className="w-4.5 h-4.5" />}
+          label="Candidates Reviewed"
+          value={loading ? "..." : candidatesReviewed}
+          sub="With submitted scores"
+          dark
+        />
+        <StatCard
+          icon={<TrendingUp className="w-4.5 h-4.5" />}
+          label="Avg. Score"
+          value={loading ? "..." : avgScore}
+          sub="Out of 100"
+        />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-4">
         <div className="lg:col-span-3 bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
-          <p className="text-[#0d1b2a] text-sm mb-4" style={{ fontWeight: 600 }}>This Week — Conducted vs Scheduled</p>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={weeklyData} barGap={4}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8" vertical={false} />
-              <XAxis dataKey="day" tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ borderRadius: 10, border: "1px solid #dde6ef", fontSize: 12 }} />
-              <Bar dataKey="conducted" fill="#0d1b2a" radius={[4, 4, 0, 0]} name="Conducted" />
-              <Bar dataKey="scheduled" fill="#4d9de0" radius={[4, 4, 0, 0]} name="Scheduled" opacity={0.6} />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[#0d1b2a] text-sm" style={{ fontWeight: 600 }}>Candidate Score vs Interviewer Score</p>
+            {mutualScoreData.length > 0 && (
+              <span className="text-xs text-[#4a6080]">
+                {mutualScoreData.length} scored {mutualScoreData.length === 1 ? "session" : "sessions"}
+              </span>
+            )}
+          </div>
+          {mutualScoreData.length === 0 ? (
+            <div className="h-[200px] flex flex-col items-center justify-center text-xs text-[#4a6080] bg-[#f0f4f8] rounded-xl text-center px-4">
+              No mutual interview scores recorded yet. Scores given by you and candidates will appear here.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={mutualScoreData} barGap={6}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8" vertical={false} />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
+                <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  formatter={(value: any, name: string, item: any) => {
+                    if (name === "Interviewer Score" && !item?.payload?.hasInterviewerScore) {
+                      return ["Not submitted yet", name];
+                    }
+                    return [`${value}/100`, name];
+                  }}
+                  labelFormatter={(_label, payload) => {
+                    const item = payload?.[0]?.payload;
+                    return item?.fullName ? `${item.fullName} · ${item.role}` : _label;
+                  }}
+                  contentStyle={{ borderRadius: 10, border: "1px solid #dde6ef", fontSize: 12 }}
+                />
+                <Bar dataKey="candidateScore" fill="#0d1b2a" radius={[4, 4, 0, 0]} name="Candidate Score" />
+                <Bar dataKey="interviewerScore" fill="#4d9de0" radius={[4, 4, 0, 0]} name="Interviewer Score" />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
         <div className="lg:col-span-2 bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
-          <p className="text-[#0d1b2a] text-sm mb-4" style={{ fontWeight: 600 }}>Offer Rate — 6 Months</p>
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={offerRateData}>
-              <defs>
-                <linearGradient id="intv-rate-grad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#4d9de0" stopOpacity={0.15} />
-                  <stop offset="95%" stopColor="#4d9de0" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8" />
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} unit="%" />
-              <Tooltip contentStyle={{ borderRadius: 10, border: "1px solid #dde6ef", fontSize: 12 }} />
-              <Area type="monotone" dataKey="rate" stroke="#4d9de0" strokeWidth={2.5} fill="url(#intv-rate-grad)" dot={{ r: 3, fill: "#4d9de0" }} />
-            </AreaChart>
-          </ResponsiveContainer>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[#0d1b2a] text-sm" style={{ fontWeight: 600 }}>Average Interview Score</p>
+            {dashboardData?.averageScoreGiven != null && (
+              <span className="text-xs text-[#4d9de0]" style={{ fontWeight: 600 }}>
+                Avg: {Math.round(dashboardData.averageScoreGiven)}/100
+              </span>
+            )}
+          </div>
+          {averageScoreData.length === 0 ? (
+            <div className="h-[200px] flex flex-col items-center justify-center text-xs text-[#4a6080] bg-[#f0f4f8] rounded-xl text-center px-4">
+              No completed interview scores recorded yet. Your average scoring trend will appear here once candidates are evaluated.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={averageScoreData}>
+                <defs>
+                  <linearGradient id="intv-score-grad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#4d9de0" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#4d9de0" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8" />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
+                <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  formatter={(value: any, name: string) => [`${value}/100`, name]}
+                  labelFormatter={(_label, payload) => {
+                    const item = payload?.[0]?.payload;
+                    return item?.fullName || _label;
+                  }}
+                  contentStyle={{ borderRadius: 10, border: "1px solid #dde6ef", fontSize: 12 }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="average"
+                  stroke="#4d9de0"
+                  strokeWidth={2.5}
+                  fill="url(#intv-score-grad)"
+                  dot={{ r: 3, fill: "#4d9de0" }}
+                  name="Avg Score"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
       <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
         <div className="flex items-center justify-between mb-4">
           <p className="text-[#0d1b2a] text-sm" style={{ fontWeight: 600 }}>Recent Candidate Reviews</p>
-          <button className="text-[#4d9de0] text-xs hover:underline">View all</button>
+          {reviews.length > 0 && <span className="text-[#4a6080] text-xs">{reviews.length} reviewed</span>}
         </div>
         <div className="space-y-3">
-          {recentCandidates.map((c) => (
-            <div key={c.name} className="flex items-center gap-4 p-3.5 rounded-xl bg-[#f0f4f8]">
-              <div className={`w-9 h-9 rounded-full ${c.color} flex items-center justify-center text-xs text-white`} style={{ fontWeight: 700 }}>{c.initials}</div>
-              <div className="flex-1 min-w-0">
-                <p className="text-[#0d1b2a] text-sm" style={{ fontWeight: 500 }}>{c.name}</p>
-                <p className="text-[#4a6080] text-xs">{c.role}</p>
-              </div>
-              <p className="text-[#0d1b2a] text-sm" style={{ fontWeight: 700 }}>{c.score}/100</p>
-              <span className={`text-xs px-2.5 py-1 rounded-full border ${c.decision === "Advance" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`} style={{ fontWeight: 500 }}>
-                {c.decision}
-              </span>
+          {loading ? (
+            <div className="flex items-center justify-center py-6 text-sm text-[#4a6080] gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-[#4d9de0]" />
+              <span>Loading reviews...</span>
             </div>
-          ))}
+          ) : reviews.length === 0 ? (
+            <div className="p-5 rounded-xl bg-[#f0f4f8] text-center text-xs text-[#4a6080]">
+              No candidate reviews submitted yet. When you complete and score candidate interviews, their ratings will appear here.
+            </div>
+          ) : (
+            reviews.map((c, idx) => (
+              <div key={c.candidateId ? `${c.candidateId}-${idx}` : idx} className="flex items-center gap-4 p-3.5 rounded-xl bg-[#f0f4f8]">
+                <div className={`w-9 h-9 rounded-full ${c.color || "bg-blue-500"} flex items-center justify-center text-xs text-white`} style={{ fontWeight: 700 }}>
+                  {c.initials || "CR"}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[#0d1b2a] text-sm" style={{ fontWeight: 500 }}>
+                    {c.candidateName || c.candidateEmail || "Candidate"}
+                  </p>
+                  <p className="text-[#4a6080] text-xs">
+                    {c.targetRole || c.interviewTitle || "Technical Interview"}
+                  </p>
+                </div>
+                <p className="text-[#0d1b2a] text-sm" style={{ fontWeight: 700 }}>
+                  {c.score}/100
+                </p>
+                <span
+                  className={`text-xs px-2.5 py-1 rounded-full border ${c.decision === "Advance" || (c.score != null && c.score >= 70)
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-amber-50 text-amber-700 border-amber-200"
+                    }`}
+                  style={{ fontWeight: 500 }}
+                >
+                  {c.decision || (c.score != null && c.score >= 70 ? "Advance" : "Review")}
+                </span>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>
@@ -151,9 +335,25 @@ function DashboardSection() {
 }
 
 /* ── Create Interview ── */
-function CreateSection() {
+interface CreateSectionProps {
+  onRoomCreated?: (room: InterviewDetailsResponse) => void;
+}
+
+function CreateSection({ onRoomCreated }: CreateSectionProps) {
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ title: "", role: "", type: "", duration: "60", date: "", time: "", notes: "" });
+  const [form, setForm] = useState({
+    title: "",
+    role: "",
+    type: "technical",
+    duration: "60",
+    date: "",
+    time: "",
+    candidateEmail: "",
+    notes: "",
+  });
+  const [validationError, setValidationError] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const types = [
     { id: "technical", label: "Technical", icon: "💻" },
@@ -164,6 +364,75 @@ function CreateSection() {
 
   const inputCls = "w-full bg-white border border-[#0d1b2a]/12 rounded-xl px-4 py-3 text-[#0d1b2a] placeholder-[#4a6080]/50 text-sm focus:outline-none focus:ring-2 focus:ring-[#4d9de0]/30 focus:border-[#4d9de0]/60 transition-all";
 
+  const handleNextOrSubmit = async () => {
+    setValidationError("");
+    setSubmitError("");
+
+    if (step === 1) {
+      if (!form.title.trim()) {
+        setValidationError("Interview title is required.");
+        return;
+      }
+      if (!form.role.trim()) {
+        setValidationError("Target role is required.");
+        return;
+      }
+      if (!form.type.trim()) {
+        setValidationError("Please select an interview type.");
+        return;
+      }
+      setStep(2);
+      return;
+    }
+
+    if (step === 2) {
+      const email = form.candidateEmail.trim();
+      if (!email) {
+        setValidationError("Candidate email is required.");
+        return;
+      }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        setValidationError("Please enter a valid candidate email address.");
+        return;
+      }
+
+      setIsSubmitting(true);
+      try {
+        const payload: CreateInterviewPayload = {
+          title: form.title.trim(),
+          targetRole: form.role.trim(),
+          interviewType: form.type,
+          candidateEmail: email,
+          candidateNotes: form.notes.trim() ? form.notes.trim() : undefined,
+        };
+        const createdRoom = await createInterviewRoom(payload);
+        setForm({
+          title: "",
+          role: "",
+          type: "technical",
+          duration: "60",
+          date: "",
+          time: "",
+          candidateEmail: "",
+          notes: "",
+        });
+        setStep(1);
+        if (onRoomCreated) {
+          onRoomCreated(createdRoom);
+        }
+      } catch (err: any) {
+        const msg =
+          err?.response?.data?.message ||
+          err?.message ||
+          "Failed to create interview room. Please check the candidate email and try again.";
+        setSubmitError(msg);
+      } finally {
+        setIsSubmitting(false);
+      }
+    }
+  };
+
   return (
     <div>
       <SectionHeader title="Create Interview" subtitle="Set up a new interview room in under 2 minutes." />
@@ -173,7 +442,14 @@ function CreateSection() {
         {[1, 2].map((s, i) => (
           <div key={s} className="flex items-center">
             <button
-              onClick={() => setStep(s)}
+              type="button"
+              onClick={() => {
+                if (!isSubmitting) {
+                  setValidationError("");
+                  setSubmitError("");
+                  setStep(s);
+                }
+              }}
               className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-all ${step >= s ? "bg-[#0d1b2a] text-white" : "bg-white border border-[#0d1b2a]/15 text-[#4a6080]"}`}
               style={{ fontWeight: 600 }}
             >
@@ -191,20 +467,46 @@ function CreateSection() {
         {step === 1 && (
           <div className="space-y-5">
             <div>
-              <label className="block text-[#0d1b2a] text-sm mb-1.5" style={{ fontWeight: 500 }}>Interview Title</label>
-              <input className={inputCls} placeholder="e.g. Senior Frontend — React Specialist" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+              <label className="block text-[#0d1b2a] text-sm mb-1.5" style={{ fontWeight: 500 }}>
+                Interview Title <span className="text-rose-500">*</span>
+              </label>
+              <input
+                className={inputCls}
+                placeholder="e.g. Senior Frontend — React Specialist"
+                value={form.title}
+                onChange={(e) => {
+                  setForm({ ...form, title: e.target.value });
+                  if (validationError) setValidationError("");
+                }}
+              />
             </div>
             <div>
-              <label className="block text-[#0d1b2a] text-sm mb-1.5" style={{ fontWeight: 500 }}>Target Role</label>
-              <input className={inputCls} placeholder="e.g. Senior Software Engineer" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} />
+              <label className="block text-[#0d1b2a] text-sm mb-1.5" style={{ fontWeight: 500 }}>
+                Target Role <span className="text-rose-500">*</span>
+              </label>
+              <input
+                className={inputCls}
+                placeholder="e.g. Senior Software Engineer"
+                value={form.role}
+                onChange={(e) => {
+                  setForm({ ...form, role: e.target.value });
+                  if (validationError) setValidationError("");
+                }}
+              />
             </div>
             <div>
-              <label className="block text-[#0d1b2a] text-sm mb-2" style={{ fontWeight: 500 }}>Interview Type</label>
+              <label className="block text-[#0d1b2a] text-sm mb-2" style={{ fontWeight: 500 }}>
+                Interview Type <span className="text-rose-500">*</span>
+              </label>
               <div className="grid grid-cols-2 gap-3">
                 {types.map((t) => (
                   <button
+                    type="button"
                     key={t.id}
-                    onClick={() => setForm({ ...form, type: t.id })}
+                    onClick={() => {
+                      setForm({ ...form, type: t.id });
+                      if (validationError) setValidationError("");
+                    }}
                     className={`flex items-center gap-3 p-4 rounded-xl border text-left transition-all ${form.type === t.id ? "bg-[#0d1b2a] border-[#0d1b2a] text-white" : "bg-[#f0f4f8] border-[#0d1b2a]/8 text-[#4a6080] hover:border-[#0d1b2a]/20"}`}
                   >
                     <span className="text-lg">{t.icon}</span>
@@ -219,11 +521,11 @@ function CreateSection() {
         {step === 2 && (
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-4">
-              <div>
+              <div hidden>
                 <label className="block text-[#0d1b2a] text-sm mb-1.5" style={{ fontWeight: 500 }}>Date</label>
                 <input type="date" className={inputCls} value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
               </div>
-              <div>
+              <div hidden>
                 <label className="block text-[#0d1b2a] text-sm mb-1.5" style={{ fontWeight: 500 }}>Time</label>
                 <input type="time" className={inputCls} value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} />
               </div>
@@ -237,32 +539,84 @@ function CreateSection() {
               </select>
             </div>
             <div>
-              <label className="block text-[#0d1b2a] text-sm mb-1.5" style={{ fontWeight: 500 }}>Candidate Email</label>
-              <input type="email" className={inputCls} placeholder="candidate@email.com" />
+              <label className="block text-[#0d1b2a] text-sm mb-1.5" style={{ fontWeight: 500 }}>
+                Candidate Email <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="email"
+                className={inputCls}
+                placeholder="candidate@email.com"
+                value={form.candidateEmail}
+                onChange={(e) => {
+                  setForm({ ...form, candidateEmail: e.target.value });
+                  if (validationError) setValidationError("");
+                  if (submitError) setSubmitError("");
+                }}
+              />
             </div>
             <div>
               <label className="block text-[#0d1b2a] text-sm mb-1.5" style={{ fontWeight: 500 }}>
                 Notes for Candidate <span className="text-[#4a6080] font-normal">(optional)</span>
               </label>
-              <textarea className={`${inputCls} resize-none h-24`} placeholder="Preparation tips, what to expect..." value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+              <textarea
+                className={`${inputCls} resize-none h-24`}
+                placeholder="Preparation tips, what to expect..."
+                value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              />
             </div>
             <div className="p-4 bg-[#0d1b2a]/4 rounded-xl border border-[#0d1b2a]/8">
               <p className="text-[#0d1b2a] text-sm mb-0.5" style={{ fontWeight: 600 }}>Ready to create?</p>
-              <p className="text-[#4a6080] text-xs">A room link will be generated and emailed to the candidate automatically.</p>
+              <p className="text-[#4a6080] text-xs">The interview room will be initialized and stored in the database ready for your session.</p>
             </div>
           </div>
         )}
 
+        {validationError && (
+          <div className="flex items-center gap-2 p-3 mt-4 text-xs font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded-xl">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+            <span>{validationError}</span>
+          </div>
+        )}
+
+        {submitError && (
+          <div className="flex items-center gap-2 p-3 mt-4 text-xs font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded-xl">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+            <span>{submitError}</span>
+          </div>
+        )}
+
         <div className="flex items-center justify-between mt-7 pt-5 border-t border-[#0d1b2a]/8">
-          <button onClick={() => setStep(Math.max(1, step - 1))} disabled={step === 1} className="text-[#4a6080] text-sm disabled:opacity-30 hover:text-[#0d1b2a] transition-colors" style={{ fontWeight: 500 }}>
+          <button
+            type="button"
+            onClick={() => {
+              setValidationError("");
+              setSubmitError("");
+              setStep(Math.max(1, step - 1));
+            }}
+            disabled={step === 1 || isSubmitting}
+            className="text-[#4a6080] text-sm disabled:opacity-30 hover:text-[#0d1b2a] transition-colors"
+            style={{ fontWeight: 500 }}
+          >
             ← Back
           </button>
           <button
-            onClick={() => { if (step < 2) setStep(step + 1); }}
-            className="bg-[#0d1b2a] text-white text-sm px-6 py-2.5 rounded-xl hover:bg-[#1a2f45] transition-colors"
+            type="button"
+            onClick={handleNextOrSubmit}
+            disabled={isSubmitting}
+            className="flex items-center gap-2 bg-[#0d1b2a] text-white text-sm px-6 py-2.5 rounded-xl hover:bg-[#1a2f45] transition-colors disabled:opacity-60"
             style={{ fontWeight: 600 }}
           >
-            {step === 2 ? "Create Room →" : "Continue →"}
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Creating Room...</span>
+              </>
+            ) : step === 2 ? (
+              "Create Room →"
+            ) : (
+              "Continue →"
+            )}
           </button>
         </div>
       </div>
@@ -279,9 +633,7 @@ export function RoomsSection() {
           <h2 className="text-[#0d1b2a]" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700, fontSize: "1.35rem" }}>Interview Rooms</h2>
           <p className="text-[#4a6080] text-sm mt-1">Manage all your created interview sessions.</p>
         </div>
-        <button className="flex items-center gap-2 bg-[#0d1b2a] text-white text-sm px-4 py-2.5 rounded-xl hover:bg-[#1a2f45] transition-colors" style={{ fontWeight: 600 }}>
-          <PlusCircle className="w-3.5 h-3.5" /> New Room
-        </button>
+
       </div>
       <div className="space-y-3">
         {rooms.map((r) => (
@@ -343,27 +695,42 @@ export function RoomsSection() {
   );
 }
 
-/* ── Profile ── */
-function CurrentRoomsSection() {
+/* ── Current Real Rooms ── */
+interface CurrentRoomsSectionProps {
+  refreshTrigger?: number;
+  successMessage?: string | null;
+  onClearSuccessMessage?: () => void;
+  onNewRoom?: () => void;
+}
+
+function CurrentRoomsSection({
+  refreshTrigger,
+  successMessage,
+  onClearSuccessMessage,
+  onNewRoom,
+}: CurrentRoomsSectionProps) {
   const navigate = useNavigate();
-  const [rooms, setRooms] = useState<InterviewRoomRecord[]>([]);
+  const [roomsList, setRoomsList] = useState<InterviewRoomRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [startingRoomId, setStartingRoomId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    const loadRooms = async () => {
-      try {
-        setRooms(await getCurrentInterviewRooms());
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unable to load interview rooms.");
-      } finally {
-        setLoading(false);
-      }
-    };
+  const loadRooms = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const data = await getCurrentInterviewRooms();
+      setRoomsList(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load interview rooms.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     loadRooms();
-  }, []);
+  }, [refreshTrigger]);
 
   const enterRoom = async (room: InterviewRoomRecord) => {
     setStartingRoomId(room.roomId);
@@ -382,21 +749,62 @@ function CurrentRoomsSection() {
 
   return (
     <div>
-      <SectionHeader title="Interview Rooms" subtitle="Manage your scheduled and active interview sessions." />
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <SectionHeader title="Interview Rooms" subtitle="Manage your scheduled and active interview sessions." />
+        </div>
+
+      </div>
+
+      {successMessage && (
+        <div className="flex items-center justify-between gap-2 p-4 mb-5 text-sm font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600" />
+            <span>{successMessage}</span>
+          </div>
+          {onClearSuccessMessage && (
+            <button
+              onClick={onClearSuccessMessage}
+              className="text-emerald-700 hover:text-emerald-900 transition-colors p-1"
+              title="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      )}
+
       {error && <p className="mb-3 text-sm text-rose-600">{error}</p>}
       {loading ? (
-        <p className="text-sm text-[#4a6080]">Loading interview rooms...</p>
-      ) : rooms.length === 0 ? (
-        <p className="text-sm text-[#4a6080]">No active or scheduled interview rooms.</p>
+        <div className="p-8 text-center bg-white rounded-2xl border border-[#0d1b2a]/8">
+          <Loader2 className="w-6 h-6 animate-spin mx-auto text-[#4d9de0] mb-2" />
+          <p className="text-sm text-[#4a6080]">Loading interview rooms...</p>
+        </div>
+      ) : roomsList.length === 0 ? (
+        <div className="p-8 text-center bg-white rounded-2xl border border-[#0d1b2a]/8">
+          <Video className="w-8 h-8 mx-auto mb-2 text-[#4a6080]/60" />
+          <p className="text-sm font-medium text-[#0d1b2a]">No active or scheduled interview rooms.</p>
+          <p className="mt-1 text-xs text-[#4a6080]">Click "New Room" to schedule an interview with a candidate.</p>
+        </div>
       ) : (
         <div className="space-y-3">
-          {rooms.map((room) => (
-            <div key={room.roomId} className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-5">
+          {roomsList.map((room) => (
+            <div key={room.roomId} className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-5 hover:border-[#4d9de0]/30 transition-all">
               <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="text-[#0d1b2a]" style={{ fontWeight: 600 }}>{room.title}</h3>
-                  <p className="mt-1 text-xs text-[#4a6080]">{room.candidateEmail} · {room.targetRole}</p>
-                  <p className="mt-3 text-xs text-[#4a6080]">{room.roomId} · {room.interviewType}</p>
+                <div className="flex items-start gap-4">
+                  <div className="w-11 h-11 rounded-xl bg-[#0d1b2a]/6 flex items-center justify-center shrink-0">
+                    <Video className="w-5 h-5 text-[#0d1b2a]" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2.5">
+                      <h3 className="text-[#0d1b2a]" style={{ fontWeight: 600 }}>{room.title}</h3>
+                      <span className={`text-xs px-2.5 py-0.5 rounded-full border ${room.status === "CREATED" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`} style={{ fontWeight: 500 }}>
+                        {room.status === "CREATED" ? "Scheduled" : room.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-[#4a6080]">Candidate: {room.candidateEmail} · Role: {room.targetRole}</p>
+                    <p className="mt-2 text-xs text-[#4a6080] font-mono bg-[#f0f4f8] px-2 py-0.5 rounded inline-block">Room ID: {room.roomId}</p>
+                  </div>
                 </div>
                 <button
                   onClick={() => enterRoom(room)}
@@ -415,27 +823,65 @@ function CurrentRoomsSection() {
   );
 }
 
-function ProfileSection({ onEdit }: { onEdit: () => void }) {
-  const specializations = ["Frontend", "System Design", "Behavioral", "Full-Stack", "Data Engineering"];
+/* ── Profile ── */
+interface ProfileSectionProps {
+  user: InterviewerProfile | null;
+  dashboardData: InterviewerDashboardData | null;
+  onEdit: () => void;
+}
+
+function ProfileSection({ user, dashboardData, onEdit }: ProfileSectionProps) {
+  const displayName = user?.name?.trim() || "Interviewer";
+  const initials = displayName
+    .split(" ")
+    .filter(Boolean)
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "IN";
+
+  const reviews = dashboardData?.recentCandidateReviews && dashboardData.recentCandidateReviews.length > 0
+    ? dashboardData.recentCandidateReviews
+    : [];
+
   return (
     <div>
       <SectionHeader title="Profile" subtitle="Your interviewer profile seen by candidates and the platform." />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-7 flex flex-col items-center text-center h-fit">
-          <div className="w-20 h-20 rounded-full bg-[#1a4a7a] flex items-center justify-center text-white text-2xl mb-4" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700 }}>
-            SL
+          <div className="relative mb-4">
+            {user?.avatar ? (
+              <img
+                src={user.avatar}
+                alt={displayName}
+                className="w-20 h-20 rounded-full object-cover"
+              />
+            ) : (
+              <div
+                className="w-20 h-20 rounded-full bg-[#1a4a7a] flex items-center justify-center text-white text-2xl"
+                style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700 }}
+              >
+                {initials}
+              </div>
+            )}
           </div>
-          <h3 className="text-[#0d1b2a] mb-0.5" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700, fontSize: "1.1rem" }}>Sarah Lin</h3>
-          <p className="text-[#4a6080] text-sm mb-1">sarah.lin@company.com</p>
-          <p className="text-[#4a6080] text-xs mb-4">Engineering Manager · San Francisco, CA</p>
-          <div className="flex gap-1.5 flex-wrap justify-center mb-5">
-            {specializations.map((s) => (
-              <span key={s} className="text-xs bg-[#f0f4f8] text-[#4a6080] border border-[#0d1b2a]/8 px-2.5 py-1 rounded-full">{s}</span>
-            ))}
-          </div>
+          <h3
+            className="text-[#0d1b2a] mb-0.5"
+            style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700, fontSize: "1.1rem" }}
+          >
+            {displayName}
+          </h3>
+          <p className="text-[#4a6080] text-sm mb-1">{user?.email || "No email available"}</p>
+          <p className="text-[#4a6080] text-xs mb-4">
+            {user?.title ? (user.location ? `${user.title} · ${user.location}` : user.title) : (user?.location ? user.location : "Technical Interviewer")}
+          </p>
           <div className="w-full border-t border-[#0d1b2a]/8 pt-4">
             <div className="grid grid-cols-3 gap-2 text-center">
-              {[{ v: "47", l: "Interviews" }, { v: "35%", l: "Offer Rate" }, { v: "4.8★", l: "Rating" }].map(({ v, l }) => (
+              {[
+                { v: String(dashboardData?.interviewsConducted ?? 0), l: "Conducted" },
+                { v: String(dashboardData?.candidatesReviewed ?? 0), l: "Reviewed" },
+                { v: dashboardData?.averageScoreGiven != null ? `${Math.round(dashboardData.averageScoreGiven)}` : "N/A", l: "Avg. Score" },
+              ].map(({ v, l }) => (
                 <div key={l}>
                   <p className="text-[#0d1b2a] text-lg" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700 }}>{v}</p>
                   <p className="text-[#4a6080] text-xs">{l}</p>
@@ -456,24 +902,48 @@ function ProfileSection({ onEdit }: { onEdit: () => void }) {
           <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
             <p className="text-[#0d1b2a] text-sm mb-3" style={{ fontWeight: 600 }}>Bio</p>
             <p className="text-[#4a6080] text-sm leading-relaxed">
-              Engineering Manager at Stripe with 8 years in full-stack development and 3 years in technical hiring. Conducted 200+ interviews across frontend, backend, and leadership roles. Focused on calibrated, fair assessments.
+              {user?.about?.trim()
+                ? user.about
+                : "No bio added yet. Click 'Edit Profile' to add your professional background and interviewing focus."}
             </p>
           </div>
           <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
-            <p className="text-[#0d1b2a] text-sm mb-4" style={{ fontWeight: 600 }}>Interview Specializations</p>
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { area: "Technical Rounds", count: "24 sessions" },
-                { area: "System Design", count: "11 sessions" },
-                { area: "Behavioral", count: "8 sessions" },
-                { area: "Full Loop", count: "4 sessions" },
-              ].map(({ area, count }) => (
-                <div key={area} className="bg-[#f0f4f8] rounded-xl p-4 border border-[#0d1b2a]/6">
-                  <p className="text-[#0d1b2a] text-sm" style={{ fontWeight: 500 }}>{area}</p>
-                  <p className="text-[#4a6080] text-xs mt-0.5">{count}</p>
-                </div>
-              ))}
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-[#0d1b2a] text-sm" style={{ fontWeight: 600 }}>Recent Candidate Evaluations</p>
+              {reviews.length > 0 && (
+                <span className="text-[#4a6080] text-xs">{reviews.length} completed</span>
+              )}
             </div>
+            {reviews.length === 0 ? (
+              <div className="p-4 rounded-xl bg-[#f0f4f8] text-center text-xs text-[#4a6080]">
+                No candidate evaluations submitted yet. When you complete and score interviews, recent summaries will appear here.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {reviews.slice(0, 4).map((r, idx) => (
+                  <div key={r.roomId || idx} className="flex items-center justify-between p-3 rounded-xl bg-[#f0f4f8]">
+                    <div className="min-w-0">
+                      <p className="text-[#0d1b2a] text-sm" style={{ fontWeight: 500 }}>
+                        {r.candidateName || r.candidateEmail || "Candidate"}
+                      </p>
+                      <p className="text-[#4a6080] text-xs">
+                        {r.targetRole || r.interviewTitle || "Technical Interview"}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-xs font-bold text-[#0d1b2a]">{r.score}/100</span>
+                      <span className={`ml-2 text-xs px-2 py-0.5 rounded-full border ${
+                        r.decision === "Advance" || r.score >= 70
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : "bg-amber-50 text-amber-700 border-amber-200"
+                      }`}>
+                        {r.decision || (r.score >= 70 ? "Advance" : "Review")}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -482,26 +952,68 @@ function ProfileSection({ onEdit }: { onEdit: () => void }) {
 }
 
 /* ── Edit Profile ── */
-function EditProfileSection({ onBack }: { onBack: () => void }) {
-  const [specializations, setSpecializations] = useState(["Frontend", "System Design", "Behavioral", "Full-Stack", "Data Engineering"]);
-  const [newSpec, setNewSpec] = useState("");
+interface EditProfileSectionProps {
+  user: InterviewerProfile | null;
+  onBack: () => void;
+  onProfileSaved: (updated: InterviewerProfile) => void;
+}
+
+function EditProfileSection({ user, onBack, onProfileSaved }: EditProfileSectionProps) {
   const [form, setForm] = useState({
-    name: "Sarah Lin",
-    email: "sarah.lin@company.com",
-    title: "Engineering Manager",
-    location: "San Francisco, CA",
-    company: "Stripe",
-    about: "Engineering Manager at Stripe with 8 years in full-stack development and 3 years in technical hiring. Conducted 200+ interviews across frontend, backend, and leadership roles.",
-    linkedin: "linkedin.com/in/sarahlin",
-    github: "github.com/sarahlin",
-    phone: "+1 415 555 0192",
+    name: user?.name ?? "",
+    email: user?.email ?? "",
+    title: user?.title ?? "",
+    location: user?.location ?? "",
+    about: user?.about ?? "",
   });
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const inputCls = "w-full bg-[#f0f4f8] border border-[#0d1b2a]/10 rounded-xl px-4 py-3 text-[#0d1b2a] placeholder-[#4a6080]/50 text-sm focus:outline-none focus:ring-2 focus:ring-[#4d9de0]/30 focus:border-[#4d9de0]/60 transition-all";
 
-  function addSpec() {
-    const v = newSpec.trim();
-    if (v && !specializations.includes(v)) { setSpecializations([...specializations, v]); setNewSpec(""); }
+  const displayName = form.name.trim() || user?.name || "Interviewer";
+  const initials = displayName
+    .split(" ")
+    .filter(Boolean)
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "IN";
+
+  async function handleSave() {
+    if (!form.name.trim()) {
+      setSaveError("Full name cannot be empty.");
+      return;
+    }
+    setSaving(true);
+    setSaveError("");
+    try {
+      const updated = await updateInterviewerProfile({
+        name: form.name.trim(),
+        email: form.email.trim(),
+        title: form.title.trim(),
+        location: form.location.trim(),
+        about: form.about.trim(),
+      });
+      onProfileSaved(updated);
+      try {
+        const stored = JSON.parse(localStorage.getItem("user") || "{}");
+        localStorage.setItem("user", JSON.stringify({
+          ...stored,
+          name: updated.name,
+          email: updated.email,
+        }));
+      } catch {
+        // ignore storage parse error
+      }
+      onBack();
+    } catch (err: any) {
+      setSaveError(
+        err?.response?.data?.message || err?.message || "Failed to save profile changes."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -514,19 +1026,27 @@ function EditProfileSection({ onBack }: { onBack: () => void }) {
         </div>
       </div>
 
+      {saveError && (
+        <div className="flex items-center gap-2 p-3 mb-4 text-xs font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded-xl">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{saveError}</span>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Avatar */}
         <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-7 flex flex-col items-center text-center h-fit">
           <div className="relative mb-5">
-            <div className="w-24 h-24 rounded-full bg-[#1a4a7a] flex items-center justify-center text-white text-3xl" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700 }}>SL</div>
-            <button className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-[#0d1b2a] flex items-center justify-center shadow-lg hover:bg-[#1a2f45] transition-colors">
-              <Camera className="w-3.5 h-3.5 text-white" />
-            </button>
+            {user?.avatar ? (
+              <img src={user.avatar} alt={displayName} className="w-24 h-24 rounded-full object-cover" />
+            ) : (
+              <div className="w-24 h-24 rounded-full bg-[#1a4a7a] flex items-center justify-center text-white text-3xl" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700 }}>
+                {initials}
+              </div>
+            )}
           </div>
-          <p className="text-[#0d1b2a] text-sm mb-1" style={{ fontWeight: 600 }}>Profile Photo</p>
-          <p className="text-[#4a6080] text-xs mb-4">JPG, PNG or GIF · Max 4MB</p>
-          <button className="w-full border border-[#0d1b2a]/15 text-[#0d1b2a] text-sm py-2 rounded-xl hover:bg-[#f0f4f8] transition-colors" style={{ fontWeight: 500 }}>Upload Photo</button>
-          <button className="mt-2 w-full text-rose-500 text-sm py-2 rounded-xl hover:bg-rose-50 transition-colors" style={{ fontWeight: 500 }}>Remove Photo</button>
+          <p className="text-[#0d1b2a] text-sm mb-1" style={{ fontWeight: 600 }}>{displayName}</p>
+          <p className="text-[#4a6080] text-xs">Technical Interviewer</p>
         </div>
 
         {/* Form */}
@@ -534,66 +1054,62 @@ function EditProfileSection({ onBack }: { onBack: () => void }) {
           <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
             <p className="text-[#0d1b2a] text-sm mb-4" style={{ fontWeight: 600 }}>Basic Information</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {[
-                { label: "Full Name", key: "name" as const, icon: <User className="w-3.5 h-3.5 text-[#4a6080]" /> },
-                { label: "Email", key: "email" as const, icon: <Mail className="w-3.5 h-3.5 text-[#4a6080]" /> },
-                { label: "Job Title", key: "title" as const, icon: <Briefcase className="w-3.5 h-3.5 text-[#4a6080]" /> },
-                { label: "Company", key: "company" as const, icon: <Users className="w-3.5 h-3.5 text-[#4a6080]" /> },
-                { label: "Location", key: "location" as const, icon: <MapPin className="w-3.5 h-3.5 text-[#4a6080]" /> },
-                { label: "Phone", key: "phone" as const, icon: <Mic className="w-3.5 h-3.5 text-[#4a6080]" /> },
-              ].map(({ label, key, icon }) => (
-                <div key={key}>
-                  <label className="block text-[#0d1b2a] text-xs mb-1.5" style={{ fontWeight: 500 }}>{label}</label>
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2">{icon}</span>
-                    <input className={`${inputCls} pl-10`} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
-                  </div>
+              <div>
+                <label className="block text-[#0d1b2a] text-xs mb-1.5" style={{ fontWeight: 500 }}>Full Name</label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2"><User className="w-3.5 h-3.5 text-[#4a6080]" /></span>
+                  <input className={`${inputCls} pl-10`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Your full name" />
                 </div>
-              ))}
+              </div>
+              <div>
+                <label className="block text-[#0d1b2a] text-xs mb-1.5" style={{ fontWeight: 500 }}>Email</label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2"><Mail className="w-3.5 h-3.5 text-[#4a6080]" /></span>
+                  <input className={`${inputCls} pl-10`} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="name@example.com" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[#0d1b2a] text-xs mb-1.5" style={{ fontWeight: 500 }}>Job Title / Professional Role</label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2"><Briefcase className="w-3.5 h-3.5 text-[#4a6080]" /></span>
+                  <input className={`${inputCls} pl-10`} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Senior Software Engineer" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[#0d1b2a] text-xs mb-1.5" style={{ fontWeight: 500 }}>Location</label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2"><MapPin className="w-3.5 h-3.5 text-[#4a6080]" /></span>
+                  <input className={`${inputCls} pl-10`} value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="e.g. San Francisco, CA" />
+                </div>
+              </div>
             </div>
           </div>
 
           <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
-            <label className="block text-[#0d1b2a] text-sm mb-3" style={{ fontWeight: 600 }}>Bio</label>
-            <textarea className={`${inputCls} resize-none h-28`} value={form.about} onChange={(e) => setForm({ ...form, about: e.target.value })} />
+            <label className="block text-[#0d1b2a] text-sm mb-3" style={{ fontWeight: 600 }}>Bio / Summary</label>
+            <textarea className={`${inputCls} resize-none h-28`} value={form.about} onChange={(e) => setForm({ ...form, about: e.target.value })} placeholder="Share your technical experience and interview focus..." />
             <p className="text-[#4a6080] text-xs mt-1.5">{form.about.length}/400 characters</p>
           </div>
 
-          <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
-            <p className="text-[#0d1b2a] text-sm mb-3" style={{ fontWeight: 600 }}>Specializations</p>
-            <div className="flex flex-wrap gap-2 mb-3">
-              {specializations.map((s) => (
-                <span key={s} className="flex items-center gap-1.5 text-xs bg-[#4d9de0]/10 text-[#4d9de0] border border-[#4d9de0]/20 px-2.5 py-1 rounded-full" style={{ fontWeight: 500 }}>
-                  {s}
-                  <button onClick={() => setSpecializations(specializations.filter((x) => x !== s))} className="hover:text-rose-500 transition-colors"><X className="w-3 h-3" /></button>
-                </span>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <input className={`${inputCls} flex-1`} placeholder="Add specialization…" value={newSpec} onChange={(e) => setNewSpec(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addSpec()} />
-              <button onClick={addSpec} className="bg-[#0d1b2a] text-white px-4 rounded-xl hover:bg-[#1a2f45] transition-colors"><Plus className="w-4 h-4" /></button>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
-            <p className="text-[#0d1b2a] text-sm mb-4" style={{ fontWeight: 600 }}>Social Links</p>
-            <div className="space-y-3">
-              {[
-                { label: "LinkedIn", key: "linkedin" as const },
-                { label: "GitHub", key: "github" as const },
-              ].map(({ label, key }) => (
-                <div key={key}>
-                  <label className="block text-[#0d1b2a] text-xs mb-1.5" style={{ fontWeight: 500 }}>{label}</label>
-                  <input className={inputCls} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
-                </div>
-              ))}
-            </div>
-          </div>
-
           <div className="flex items-center justify-end gap-3 pb-2">
-            <button onClick={onBack} className="px-6 py-2.5 border border-[#0d1b2a]/15 text-[#4a6080] text-sm rounded-xl hover:text-[#0d1b2a] hover:bg-[#f0f4f8] transition-colors" style={{ fontWeight: 500 }}>Cancel</button>
-            <button onClick={onBack} className="flex items-center gap-2 bg-[#0d1b2a] text-white text-sm px-6 py-2.5 rounded-xl hover:bg-[#1a2f45] transition-colors" style={{ fontWeight: 600 }}>
-              <Save className="w-3.5 h-3.5" /> Save Changes
+            <button
+              type="button"
+              onClick={onBack}
+              disabled={saving}
+              className="px-6 py-2.5 border border-[#0d1b2a]/15 text-[#4a6080] text-sm rounded-xl hover:text-[#0d1b2a] hover:bg-[#f0f4f8] transition-colors disabled:opacity-50"
+              style={{ fontWeight: 500 }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-2 bg-[#0d1b2a] text-white text-sm px-6 py-2.5 rounded-xl hover:bg-[#1a2f45] transition-colors disabled:opacity-60"
+              style={{ fontWeight: 600 }}
+            >
+              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              <span>{saving ? "Saving..." : "Save Changes"}</span>
             </button>
           </div>
         </div>
@@ -604,13 +1120,109 @@ function EditProfileSection({ onBack }: { onBack: () => void }) {
 
 export default function InterviewerDashboard() {
   const [activeSection, setActiveSection] = useState("dashboard");
+  const [roomsRefreshTrigger, setRoomsRefreshTrigger] = useState(0);
+  const [roomCreatedSuccessMessage, setRoomCreatedSuccessMessage] = useState<string | null>(null);
+
+  const [profile, setProfile] = useState<InterviewerProfile | null>(() => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (stored) {
+        const u = JSON.parse(stored);
+        return {
+          id: u.id || "",
+          name: u.name || "",
+          email: u.email || "",
+          role: u.role || "interviewer",
+          title: "",
+          location: "",
+          about: "",
+        };
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  });
+  const [dashboardData, setDashboardData] = useState<InterviewerDashboardData | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const loadProfileAndStats = async () => {
+      try {
+        const [prof, dash] = await Promise.all([
+          getInterviewerProfile().catch((err) => {
+            console.warn("Could not fetch interviewer profile:", err);
+            return null;
+          }),
+          getInterviewerDashboard().catch((err) => {
+            console.warn("Could not fetch interviewer dashboard for profile:", err);
+            return null;
+          }),
+        ]);
+        if (active) {
+          if (prof) setProfile(prof);
+          if (dash) setDashboardData(dash);
+        }
+      } catch (err) {
+        console.warn("Error loading interviewer profile data:", err);
+      }
+    };
+    loadProfileAndStats();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleProfileSaved = (updated: InterviewerProfile) => {
+    setProfile(updated);
+  };
+
+  const handleRoomCreated = (createdRoom: InterviewDetailsResponse) => {
+    setRoomCreatedSuccessMessage(
+      `Interview room "${createdRoom.title}" (${createdRoom.roomId}) created successfully for ${createdRoom.candidateEmail || createdRoom.candidateId}!`
+    );
+    setRoomsRefreshTrigger((prev) => prev + 1);
+    setActiveSection("rooms");
+  };
+
+  const displayName = profile?.name?.trim() || "Interviewer";
+  const firstName = displayName.split(" ")[0];
+  const userInitials = displayName
+    .split(" ")
+    .filter(Boolean)
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "IN";
 
   const sections: Record<string, React.ReactNode> = {
     dashboard: <DashboardSection />,
-    create: <CreateSection />,
-    rooms: <CurrentRoomsSection />,
-    profile: <ProfileSection onEdit={() => setActiveSection("edit-profile")} />,
-    "edit-profile": <EditProfileSection onBack={() => setActiveSection("profile")} />,
+    create: <CreateSection onRoomCreated={handleRoomCreated} />,
+    rooms: (
+      <CurrentRoomsSection
+        refreshTrigger={roomsRefreshTrigger}
+        successMessage={roomCreatedSuccessMessage}
+        onClearSuccessMessage={() => setRoomCreatedSuccessMessage(null)}
+        onNewRoom={() => {
+          setRoomCreatedSuccessMessage(null);
+          setActiveSection("create");
+        }}
+      />
+    ),
+    profile: (
+      <ProfileSection
+        user={profile}
+        dashboardData={dashboardData}
+        onEdit={() => setActiveSection("edit-profile")}
+      />
+    ),
+    "edit-profile": (
+      <EditProfileSection
+        user={profile}
+        onBack={() => setActiveSection("profile")}
+        onProfileSaved={handleProfileSaved}
+      />
+    ),
   };
 
   return (
@@ -618,19 +1230,27 @@ export default function InterviewerDashboard() {
       role="interviewer"
       navItems={navItems}
       activeSection={activeSection}
-      onSectionChange={setActiveSection}
-      userName="Sarah Lin"
-      userInitials="SL"
+      onSectionChange={(section) => {
+        if (section !== "rooms") {
+          setRoomCreatedSuccessMessage(null);
+        }
+        setActiveSection(section);
+      }}
+      userName={displayName}
+      userInitials={userInitials}
     >
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-[#0d1b2a] leading-tight" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700, fontSize: "1.55rem" }}>
-            Welcome back, Sarah 👋
+            Welcome back, {firstName} 👋
           </h1>
-          <p className="text-[#4a6080] text-sm mt-0.5">You have 2 interviews scheduled this week.</p>
+          <p className="text-[#4a6080] text-sm mt-0.5">Manage your interviews, candidates, and evaluations.</p>
         </div>
         <button
-          onClick={() => setActiveSection("create")}
+          onClick={() => {
+            setRoomCreatedSuccessMessage(null);
+            setActiveSection("create");
+          }}
           className="hidden sm:flex items-center gap-2 bg-[#0d1b2a] text-white px-5 py-2.5 rounded-xl hover:bg-[#1a2f45] transition-colors"
           style={{ fontWeight: 600, fontSize: "0.875rem" }}
         >

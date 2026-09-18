@@ -11,6 +11,7 @@ import {
   CheckCircle,
   TrendingUp,
   ChevronRight,
+  ChevronDown,
   Play,
   Star,
   Code2,
@@ -84,6 +85,9 @@ export interface DashboardStats {
   codingTimeSeconds: number;
   mockSessions: number;
   weeklyImprovement: number;
+  totalCompletedRealInterviews?: number;
+  totalCompletedMockInterviews?: number;
+  averageRealInterviewScore?: number | null;
 }
 
 export interface SkillBreakdown {
@@ -192,6 +196,10 @@ export interface DashboardResponse {
   skills?: string[];
   targets?: string[];
   experience?: Experience[];
+
+  totalCompletedRealInterviews?: number;
+  totalCompletedMockInterviews?: number;
+  averageRealInterviewScore?: number | null;
 }
 
 const navItems = [
@@ -443,6 +451,23 @@ function DashboardSection({
     weeklyImprovement: 0,
   };
 
+  const [selectedScoreType, setSelectedScoreType] = useState<"real" | "mock">("real");
+
+  const totalRealInterviews =
+    data.totalCompletedRealInterviews ??
+    stats.totalCompletedRealInterviews ??
+    0;
+
+  const totalMockInterviews =
+    data.totalCompletedMockInterviews ??
+    stats.totalCompletedMockInterviews ??
+    interviewHistory.length;
+
+  const realScore =
+    data.averageRealInterviewScore ??
+    stats.averageRealInterviewScore ??
+    null;
+
   const readinessScore = latestInterview?.evaluation?.overallScore ?? 0;
   const totalMocks = interviewHistory.length;
 
@@ -507,31 +532,84 @@ function DashboardSection({
         title="Your Dashboard"
         subtitle="Improved performance this month."
       />
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
         <StatCard
           icon={<CheckCircle className="w-4.5 h-4.5" />}
           label="Questions Solved"
           value={String(stats.questionsSolved)}
-          // sub={`+${stats.weeklyImprovement} this week`}
         />
+
+        {/* Selectable Score Card */}
+        <div className="rounded-2xl p-5 border bg-[#00bfa6] border-[#00bfa6] flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-white/20">
+                <span className="text-[#0d1b2a]">
+                  {selectedScoreType === "real" ? (
+                    <TrendingUp className="w-4.5 h-4.5" />
+                  ) : (
+                    <BarChart2 className="w-4.5 h-4.5" />
+                  )}
+                </span>
+              </div>
+              <div className="relative">
+                <select
+                  value={selectedScoreType}
+                  onChange={(e) => setSelectedScoreType(e.target.value as "real" | "mock")}
+                  className="appearance-none bg-white/20 hover:bg-white/30 text-[#0d1b2a] text-xs font-semibold py-1.5 pl-2 pr-6 rounded-lg cursor-pointer focus:outline-none transition-colors border-none"
+                  aria-label="Select score type"
+                >
+                  <option value="real" className="bg-[#0d1b2a] text-white">
+                    Real Interview Score
+                  </option>
+                  <option value="mock" className="bg-[#0d1b2a] text-white">
+                    AI Mock Interview Score
+                  </option>
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 absolute right-1.5 top-2 text-[#0d1b2a]/70 pointer-events-none" />
+              </div>
+            </div>
+
+            <div
+              className="text-2xl mb-0.5 text-[#0d1b2a]"
+              style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700 }}
+            >
+              {selectedScoreType === "real"
+                ? (realScore != null ? String(Math.round(realScore)) : "N/A")
+                : (interviewHistory.length > 0 ? String(averageScore) : (readinessScore > 0 ? String(readinessScore) : "0"))}
+            </div>
+
+            <div className="text-sm text-[#0d1b2a]/80 font-medium">
+              {selectedScoreType === "real" ? "Real Interview Score" : "AI Mock Interview Score"}
+            </div>
+          </div>
+
+          <div className="text-xs mt-2 text-[#0d1b2a]/70">
+            {selectedScoreType === "real"
+              ? "Avg. score from interviewers"
+              : "Avg. score from mock interviews"}
+          </div>
+        </div>
+
         <StatCard
-          icon={<BarChart2 className="w-4.5 h-4.5" />}
-          label="Readiness Score"
-          value={String(readinessScore)}
-          sub={`Avg ${averageScore}/100`}
-          accent
+          icon={<Video className="w-4.5 h-4.5" />}
+          label="Real Interviews"
+          value={String(totalRealInterviews)}
+          sub="Completed sessions"
         />
+
+        <StatCard
+          icon={<Star className="w-4.5 h-4.5" />}
+          label="Mock Sessions"
+          value={String(totalMockInterviews)}
+          sub="AI mock interviews"
+        />
+
         <StatCard
           icon={<Clock className="w-4.5 h-4.5" />}
           label="Practice Hours"
           value={formatCodingTime(stats.codingTimeSeconds)}
           sub="Last 30 days"
-        />
-        <StatCard
-          icon={<Star className="w-4.5 h-4.5" />}
-          label="Mock Sessions"
-          value={String(totalMocks)}
-          sub="Completed interviews"
         />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
@@ -540,13 +618,13 @@ function DashboardSection({
             className="text-[#0d1b2a] text-sm mb-4"
             style={{ fontWeight: 600 }}
           >
-            Readiness Score
+            AI Mock Interview Score
           </p>
           {progressHistory.length === 0 ? (
             <EmptyState
               icon={<TrendingUp className="w-5 h-5" />}
               title="No progress history yet"
-              subtitle="Complete a mock interview to start tracking your readiness score over time."
+              subtitle="Complete a mock interview to start tracking your mock interview score over time."
             />
           ) : (
             <ResponsiveContainer width="100%" height={200}>
