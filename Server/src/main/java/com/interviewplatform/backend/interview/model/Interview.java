@@ -39,6 +39,8 @@ public class Interview {
 
     private LocalDateTime startedAt;
 
+    private LocalDateTime candidateJoinedAt;
+
     private LocalDateTime endedAt;
 
     private LocalDateTime updatedAt;
@@ -166,6 +168,14 @@ public class Interview {
 
     public void setStartedAt(LocalDateTime startedAt) {
         this.startedAt = startedAt;
+    }
+
+    public LocalDateTime getCandidateJoinedAt() {
+        return candidateJoinedAt;
+    }
+
+    public void setCandidateJoinedAt(LocalDateTime candidateJoinedAt) {
+        this.candidateJoinedAt = candidateJoinedAt;
     }
 
     public LocalDateTime getEndedAt() {

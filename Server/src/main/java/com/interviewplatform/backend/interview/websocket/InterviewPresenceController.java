@@ -3,6 +3,8 @@ package com.interviewplatform.backend.interview.websocket;
 import com.interviewplatform.backend.interview.model.Interview;
 import com.interviewplatform.backend.interview.repository.InterviewRepository;
 import com.interviewplatform.backend.model.User;
+import com.interviewplatform.backend.notification.model.NotificationType;
+import com.interviewplatform.backend.notification.service.NotificationService;
 import com.interviewplatform.backend.service.UserService;
 
 import org.springframework.messaging.handler.annotation.DestinationVariable;
@@ -20,12 +22,24 @@ public class InterviewPresenceController {
 
     private final InterviewRepository interviewRepository;
 
+    private final NotificationService notificationService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public InterviewPresenceController(
+            UserService userService,
+            InterviewRepository interviewRepository,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) NotificationService notificationService
+    ) {
+        this.userService = userService;
+        this.interviewRepository = interviewRepository;
+        this.notificationService = notificationService;
+    }
+
     public InterviewPresenceController(
             UserService userService,
             InterviewRepository interviewRepository
     ) {
-        this.userService = userService;
-        this.interviewRepository = interviewRepository;
+        this(userService, interviewRepository, null);
     }
 
     @MessageMapping("/interview/{roomId}/join")
@@ -176,6 +190,37 @@ public class InterviewPresenceController {
                         + " | "
                         + user.getId()
         );
+
+        /*
+         * Trigger notifications for real-time interview presence events
+         */
+        if ("candidate".equalsIgnoreCase(user.getRole())) {
+            if (interview.getCandidateJoinedAt() == null) {
+                interview.setCandidateJoinedAt(java.time.LocalDateTime.now());
+                interviewRepository.save(interview);
+            }
+            if (notificationService != null) {
+                notificationService.createAndSendNotification(
+                        interview.getInterviewerId(),
+                        NotificationType.CANDIDATE_JOINED,
+                        "Candidate Joined",
+                        user.getName() + " has joined the interview.",
+                        interview.getId(),
+                        interview.getRoomId()
+                );
+            }
+        } else if ("interviewer".equalsIgnoreCase(user.getRole())) {
+            if (notificationService != null && interview.getCandidateJoinedAt() == null) {
+                notificationService.createAndSendNotification(
+                        interview.getCandidateId(),
+                        NotificationType.INTERVIEWER_WAITING,
+                        "Interviewer is Waiting",
+                        "Your interviewer is waiting for you to join the interview.",
+                        interview.getId(),
+                        interview.getRoomId()
+                );
+            }
+        }
 
         return presence;
     }

@@ -1,20 +1,20 @@
 import { useState, useRef, useEffect } from "react";
 import { Link } from "react-router";
-import { Video, Bell, ChevronDown, Menu, X, LogOut, CheckCircle, Clock, Calendar } from "lucide-react";
+import { Video, Bell, ChevronDown, Menu, X, LogOut, CheckCircle, Clock, Calendar, Star } from "lucide-react";
+import { Client } from "@stomp/stompjs";
+import { getToken, getUser } from "../bot/utils/auth";
+import {
+  getNotifications,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+  type NotificationItem,
+  type NotificationType,
+} from "../../services/notificationService";
 
 type NavItem = {
   icon: React.ReactNode;
   label: string;
   id: string;
-};
-
-type Notification = {
-  id: number;
-  title: string;
-  desc: string;
-  time: string;
-  read: boolean;
-  icon: React.ReactNode;
 };
 
 type Props = {
@@ -25,54 +25,56 @@ type Props = {
   children: React.ReactNode;
   userName?: string;
   userInitials?: string;
-  notifications?: Notification[];
+  notifications?: NotificationItem[];
 };
 
-const defaultCandidateNotifications: Notification[] = [
-  {
-    id: 1,
-    title: "Interview Scheduled",
-    desc: "Google L5 — Technical with Sarah on Jun 16 at 3:00 PM",
-    time: "2h ago",
-    read: false,
-    icon: <Calendar className="w-3.5 h-3.5 text-[#00bfa6]" />,
-  },
-  {
-    id: 2,
-    title: "AI Feedback Ready",
-    desc: "Your Behavioral Round from Jun 12 has been scored.",
-    time: "1d ago",
-    read: false,
-    icon: <CheckCircle className="w-3.5 h-3.5 text-[#00bfa6]" />,
-  },
-  {
-    id: 3,
-    title: "Mock Session Reminder",
-    desc: "System Design session starts in 30 minutes.",
-    time: "2d ago",
-    read: true,
-    icon: <Clock className="w-3.5 h-3.5 text-[#4a6080]" />,
-  },
-];
+function getWebSocketUrl() {
+  const apiUrl = new URL(import.meta.env.VITE_API_URL ?? window.location.origin);
+  apiUrl.protocol = apiUrl.protocol === "https:" ? "wss:" : "ws:";
+  apiUrl.pathname = "/ws";
+  apiUrl.search = "";
+  apiUrl.hash = "";
+  return apiUrl.toString();
+}
 
-const defaultInterviewerNotifications: Notification[] = [
-  {
-    id: 1,
-    title: "Candidate Confirmed",
-    desc: "Priya Nair confirmed for Jun 16 at 2:00 PM.",
-    time: "3h ago",
-    read: false,
-    icon: <CheckCircle className="w-3.5 h-3.5 text-[#4d9de0]" />,
-  },
-  {
-    id: 2,
-    title: "Scorecard Due",
-    desc: "Complete James Wright's evaluation by Jun 22.",
-    time: "1d ago",
-    read: true,
-    icon: <Clock className="w-3.5 h-3.5 text-[#4a6080]" />,
-  },
-];
+function formatNotificationTime(isoString?: string): string {
+  if (!isoString) return "Just now";
+  try {
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000);
+    if (diffSec < 60) return "Just now";
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  } catch {
+    return "Just now";
+  }
+}
+
+function getNotificationIcon(type: NotificationType, role: "candidate" | "interviewer") {
+  switch (type) {
+    case "INTERVIEW_SCHEDULED":
+      return <Calendar className="w-3.5 h-3.5 text-[#00bfa6]" />;
+    case "INTERVIEWER_WAITING":
+      return <Clock className="w-3.5 h-3.5 text-[#f59e0b]" />;
+    case "CANDIDATE_JOINED":
+      return <CheckCircle className="w-3.5 h-3.5 text-[#00bfa6]" />;
+    case "INTERVIEW_COMPLETED":
+      return <CheckCircle className={`w-3.5 h-3.5 ${role === "candidate" ? "text-[#00bfa6]" : "text-[#4d9de0]"}`} />;
+    case "INTERVIEW_SCORE_RECEIVED":
+    case "CANDIDATE_REVIEW_RECEIVED":
+      return <Star className="w-3.5 h-3.5 text-[#f59e0b]" />;
+    case "EVALUATION_PENDING":
+      return <Clock className="w-3.5 h-3.5 text-[#f59e0b]" />;
+    default:
+      return <Bell className="w-3.5 h-3.5 text-[#4a6080]" />;
+  }
+}
 
 export function DashboardLayout({
   role,
@@ -90,14 +92,90 @@ export function DashboardLayout({
   const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
 
-  const initialNotifs = notifications ?? (role === "candidate" ? defaultCandidateNotifications : defaultInterviewerNotifications);
-  const [notifList, setNotifList] = useState(initialNotifs);
+  const [notifList, setNotifList] = useState<NotificationItem[]>(notifications ?? []);
+  const [toastNotif, setToastNotif] = useState<NotificationItem | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const user = getUser();
+    const token = getToken();
+
+    // 1. Fetch persisted notifications from backend MongoDB
+    getNotifications()
+      .then((data) => {
+        if (isMounted && Array.isArray(data)) {
+          setNotifList(data);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to load notifications:", err);
+      });
+
+    // 2. Real-time STOMP notification subscription
+    if (!token || !user?.id) {
+      return;
+    }
+
+    const client = new Client({
+      brokerURL: getWebSocketUrl(),
+      connectHeaders: {
+        Authorization: `Bearer ${token}`,
+      },
+      reconnectDelay: 5000,
+      onConnect: () => {
+        client.subscribe(`/topic/notifications/${user.id}`, (message) => {
+          try {
+            const newNotif = JSON.parse(message.body) as NotificationItem;
+            if (isMounted && newNotif && newNotif.id) {
+              setNotifList((prev) => {
+                if (prev.some((n) => n.id === newNotif.id)) return prev;
+                return [newNotif, ...prev];
+              });
+              setToastNotif(newNotif);
+              setTimeout(() => {
+                setToastNotif((curr) => (curr?.id === newNotif.id ? null : curr));
+              }, 6000);
+            }
+          } catch (e) {
+            console.error("Failed to parse incoming notification:", e);
+          }
+        });
+      },
+    });
+
+    client.activate();
+
+    return () => {
+      isMounted = false;
+      void client.deactivate();
+    };
+  }, []);
+
+  async function handleMarkAsRead(id: string) {
+    try {
+      setNotifList((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+      );
+      await markNotificationAsRead(id);
+    } catch (err) {
+      console.error("Failed to mark notification as read:", err);
+    }
+  }
+
+  async function handleMarkAllAsRead() {
+    try {
+      setNotifList((prev) => prev.map((n) => ({ ...n, read: true })));
+      await markAllNotificationsAsRead();
+    } catch (err) {
+      console.error("Failed to mark all notifications as read:", err);
+    }
+  }
+
+  function dismissNotif(id: string) {
+    void handleMarkAsRead(id);
+  }
 
   const allNotifs = notifList;
-
-  function dismissNotif(id: number) {
-    setNotifList((prev) => prev.filter((n) => n.id !== id));
-  }
   const unread = allNotifs.filter((n) => !n.read).length;
 
   const avatarColor = role === "candidate" ? "bg-[#00bfa6]" : "bg-[#1a4a7a]";
@@ -201,6 +279,26 @@ export function DashboardLayout({
         <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
+      {/* Instant Notification Toast */}
+      {toastNotif && (
+        <div className="fixed top-20 right-6 z-50 max-w-sm w-full bg-white rounded-2xl shadow-2xl border border-[#0d1b2a]/10 p-4 animate-in fade-in slide-in-from-top-3 flex items-start gap-3">
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${role === "candidate" ? "bg-[#00bfa6]/15" : "bg-[#4d9de0]/15"}`}>
+            {getNotificationIcon(toastNotif.type, role)}
+          </div>
+          <div className="flex-1 min-w-0 pr-2">
+            <p className="text-[#0d1b2a] text-xs font-semibold">{toastNotif.title}</p>
+            <p className="text-[#4a6080] text-xs mt-0.5 leading-snug">{toastNotif.message}</p>
+            <p className="text-[#4a6080]/60 text-[10px] mt-1">Just now</p>
+          </div>
+          <button
+            onClick={() => setToastNotif(null)}
+            className="text-[#4a6080]/60 hover:text-[#0d1b2a] transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Main */}
       <div className="flex-1 lg:ml-60 flex flex-col min-h-screen">
         {/* Top bar */}
@@ -255,10 +353,11 @@ export function DashboardLayout({
                       {allNotifs.map((n, i) => (
                         <div
                           key={n.id}
-                          className={`group relative flex gap-3 px-4 py-3.5 hover:bg-[#f0f4f8] transition-colors ${i > 0 ? "border-t border-[#0d1b2a]/5" : ""} ${!n.read ? "bg-[#f8fafc]" : ""}`}
+                          onClick={() => handleMarkAsRead(n.id)}
+                          className={`group relative flex gap-3 px-4 py-3.5 hover:bg-[#f0f4f8] cursor-pointer transition-colors ${i > 0 ? "border-t border-[#0d1b2a]/5" : ""} ${!n.read ? "bg-[#f8fafc]" : ""}`}
                         >
                           <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${!n.read ? (role === "candidate" ? "bg-[#00bfa6]/15" : "bg-[#4d9de0]/15") : "bg-[#0d1b2a]/5"}`}>
-                            {n.icon}
+                            {getNotificationIcon(n.type, role)}
                           </div>
                           <div className="flex-1 min-w-0 pr-5">
                             <div className="flex items-start gap-2">
@@ -267,13 +366,13 @@ export function DashboardLayout({
                               </p>
                               {!n.read && <div className={`w-1.5 h-1.5 rounded-full ${dotColor} shrink-0 mt-1`} />}
                             </div>
-                            <p className="text-[#4a6080] text-xs mt-0.5 leading-snug">{n.desc}</p>
-                            <p className="text-[#4a6080]/60 text-[10px] mt-1">{n.time}</p>
+                            <p className="text-[#4a6080] text-xs mt-0.5 leading-snug">{n.message}</p>
+                            <p className="text-[#4a6080]/60 text-[10px] mt-1">{formatNotificationTime(n.createdAt)}</p>
                           </div>
                           <button
                             onClick={(e) => { e.stopPropagation(); dismissNotif(n.id); }}
                             className="absolute top-3 right-3 w-5 h-5 rounded-full flex items-center justify-center text-[#4a6080]/40 opacity-0 group-hover:opacity-100 hover:bg-[#0d1b2a]/8 hover:text-[#0d1b2a] transition-all"
-                            title="Dismiss"
+                            title="Mark as read"
                           >
                             <X className="w-3 h-3" />
                           </button>
@@ -282,11 +381,17 @@ export function DashboardLayout({
                     </div>
                   )}
 
-                  <div className="px-4 py-2.5 border-t border-[#0d1b2a]/8">
-                    <button className={`text-xs w-full text-center ${accentText} hover:underline`} style={{ fontWeight: 500 }}>
-                      Mark all as read
-                    </button>
-                  </div>
+                  {allNotifs.length > 0 && (
+                    <div className="px-4 py-2.5 border-t border-[#0d1b2a]/8">
+                      <button
+                        onClick={handleMarkAllAsRead}
+                        className={`text-xs w-full text-center ${accentText} hover:underline`}
+                        style={{ fontWeight: 500 }}
+                      >
+                        Mark all as read
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

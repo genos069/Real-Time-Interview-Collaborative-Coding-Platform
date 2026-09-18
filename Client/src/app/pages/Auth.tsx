@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useSearchParams, Link, useNavigate } from "react-router";
-import { Video, Eye, EyeOff, ArrowLeft, ChevronDown, Mail, Lock, User, Building2 } from "lucide-react";
+import { Video, Eye, EyeOff, ArrowLeft, ChevronDown, Mail, Lock, User, Building2, CheckCircle } from "lucide-react";
 import {
   loginUser,
   registerUser,
@@ -17,6 +17,7 @@ export default function Auth() {
   const [tab, setTab] = useState<Tab>("login");
   const [showPass, setShowPass] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -31,6 +32,11 @@ export default function Auth() {
   };
   const [loading, setLoading] = useState(false);
 
+  const handleTabChange = (newTab: Tab) => {
+    setTab(newTab);
+    setSuccessMessage("");
+  };
+
   const roleLabel = role === "interviewer" ? "Interviewer" : "Candidate";
   const roleColor = role === "interviewer" ? "text-[#0d1b2a]" : "text-[#00bfa6]";
   const roleBg = role === "interviewer" ? "bg-[#0d1b2a]" : "bg-[#00bfa6]";
@@ -40,11 +46,13 @@ export default function Auth() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSuccessMessage("");
 
     try {
-      let response;
+      setLoading(true);
 
       if (tab === "login") {
+        let response;
         if (role === "candidate") {
           response = await loginUser({
             email: formData.email,
@@ -56,6 +64,23 @@ export default function Auth() {
             password: formData.password,
           });
         }
+
+        // Save JWT
+        localStorage.setItem("token", response.data.token);
+
+        // Save user data
+        const userData = response.data?.user || {
+          id: response.data?.id,
+          name: response.data?.name,
+          email: response.data?.email,
+          role: response.data?.role ? String(response.data.role).toLowerCase().replace(/^role_/, "") : role,
+        };
+        localStorage.setItem(
+          "user",
+          JSON.stringify(userData)
+        );
+
+        navigate(role === "interviewer" ? "/interviewer" : "/candidate");
       } else {
         if (formData.password !== formData.confirmPassword) {
           alert("Passwords do not match");
@@ -63,39 +88,32 @@ export default function Auth() {
         }
 
         if (role === "candidate") {
-          response = await registerUser({
+          await registerUser({
             name: formData.name,
             email: formData.email,
             password: formData.password,
           });
         } else {
-          response = await registerInterviewer({
+          await registerInterviewer({
             name: formData.name,
             email: formData.email,
             password: formData.password,
           });
         }
+
+        // Clean any old session data
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+
+        // Transition to login state
+        setTab("login");
+        setSuccessMessage("Account created successfully! Please sign in with your password.");
+        setFormData((prev) => ({
+          ...prev,
+          password: "",
+          confirmPassword: "",
+        }));
       }
-
-      // console.log(response.data);
-
-      // Save JWT
-      localStorage.setItem("token", response.data.token);
-
-      // Save user data
-      const userData = response.data?.user || {
-        id: response.data?.id,
-        name: response.data?.name,
-        email: response.data?.email,
-        role: response.data?.role ? String(response.data.role).toLowerCase().replace(/^role_/, "") : role,
-      };
-      localStorage.setItem(
-        "user",
-        JSON.stringify(userData)
-      );
-      setLoading(false);
-
-      navigate(role === "interviewer" ? "/interviewer" : "/candidate");
     } catch (error: any) {
       console.error(error);
 
@@ -103,8 +121,9 @@ export default function Auth() {
         error?.response?.data?.message ||
         "Something went wrong"
       );
+    } finally {
+      setLoading(false);
     }
-
   };
 
   return (
@@ -238,7 +257,7 @@ export default function Auth() {
             {(["login", "signup"] as Tab[]).map((t) => (
               <button
                 key={t}
-                onClick={() => setTab(t)}
+                onClick={() => handleTabChange(t)}
                 className={`flex-1 py-2.5 rounded-lg text-sm transition-all ${tab === t
                   ? "bg-white text-[#0d1b2a] shadow-sm"
                   : "text-[#4a6080] hover:text-[#0d1b2a]"
@@ -263,6 +282,13 @@ export default function Auth() {
                 : "Create your account to get started."}
             </p>
           </div>
+
+          {successMessage && (
+            <div className="mb-4 p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-xs flex items-center gap-2 font-medium">
+              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{successMessage}</span>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Full name — signup only */}
@@ -437,7 +463,7 @@ export default function Auth() {
           <p className="text-center text-[#4a6080] text-xs mt-6">
             {tab === "login" ? "Don't have an account? " : "Already have an account? "}
             <button
-              onClick={() => setTab(tab === "login" ? "signup" : "login")}
+              onClick={() => handleTabChange(tab === "login" ? "signup" : "login")}
               className="text-[#00bfa6] hover:underline"
               style={{ fontWeight: 600 }}
             >

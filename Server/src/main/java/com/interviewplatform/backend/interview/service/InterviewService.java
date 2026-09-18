@@ -18,12 +18,15 @@ import com.interviewplatform.backend.interview.websocket.InterviewEventMessage;
 import com.interviewplatform.backend.model.User;
 import com.interviewplatform.backend.repository.UserRepository;
 import com.interviewplatform.backend.bot.exception.ApiException;
+import com.interviewplatform.backend.notification.model.NotificationType;
+import com.interviewplatform.backend.notification.service.NotificationService;
 import com.interviewplatform.backend.service.UserService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -48,6 +51,8 @@ public class InterviewService {
 
     private final org.springframework.messaging.simp.SimpMessagingTemplate messagingTemplate;
 
+    private final NotificationService notificationService;
+
     @org.springframework.beans.factory.annotation.Autowired
     public InterviewService(
             InterviewRepository interviewRepository,
@@ -55,7 +60,8 @@ public class InterviewService {
             UserService userService,
             OnlineCompilerClient onlineCompilerClient,
             @org.springframework.beans.factory.annotation.Autowired(required = false) InterviewScoreRepository interviewScoreRepository,
-            @org.springframework.beans.factory.annotation.Autowired(required = false) org.springframework.messaging.simp.SimpMessagingTemplate messagingTemplate
+            @org.springframework.beans.factory.annotation.Autowired(required = false) org.springframework.messaging.simp.SimpMessagingTemplate messagingTemplate,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) NotificationService notificationService
     ) {
         this.interviewRepository = interviewRepository;
         this.userRepository = userRepository;
@@ -63,6 +69,18 @@ public class InterviewService {
         this.onlineCompilerClient = onlineCompilerClient;
         this.interviewScoreRepository = interviewScoreRepository;
         this.messagingTemplate = messagingTemplate;
+        this.notificationService = notificationService;
+    }
+
+    public InterviewService(
+            InterviewRepository interviewRepository,
+            UserRepository userRepository,
+            UserService userService,
+            OnlineCompilerClient onlineCompilerClient,
+            InterviewScoreRepository interviewScoreRepository,
+            org.springframework.messaging.simp.SimpMessagingTemplate messagingTemplate
+    ) {
+        this(interviewRepository, userRepository, userService, onlineCompilerClient, interviewScoreRepository, messagingTemplate, null);
     }
 
     public InterviewService(
@@ -72,7 +90,7 @@ public class InterviewService {
             OnlineCompilerClient onlineCompilerClient,
             org.springframework.messaging.simp.SimpMessagingTemplate messagingTemplate
     ) {
-        this(interviewRepository, userRepository, userService, onlineCompilerClient, null, messagingTemplate);
+        this(interviewRepository, userRepository, userService, onlineCompilerClient, null, messagingTemplate, null);
     }
 
     public InterviewService(
@@ -81,7 +99,7 @@ public class InterviewService {
             UserService userService,
             OnlineCompilerClient onlineCompilerClient
     ) {
-        this(interviewRepository, userRepository, userService, onlineCompilerClient, null, null);
+        this(interviewRepository, userRepository, userService, onlineCompilerClient, null, null, null);
     }
 
 
@@ -227,9 +245,23 @@ public class InterviewService {
 
         // Save room
 
-        return interviewRepository.save(
+        Interview savedInterview = interviewRepository.save(
                 interview
         );
+
+        if (notificationService != null) {
+            String formattedTime = now.format(DateTimeFormatter.ofPattern("MMM dd, yyyy 'at' hh:mm a"));
+            notificationService.createAndSendNotification(
+                    candidate.getId(),
+                    NotificationType.INTERVIEW_SCHEDULED,
+                    "Interview Scheduled",
+                    "Your interview \"" + savedInterview.getTitle() + "\" has been scheduled for " + formattedTime + ".",
+                    savedInterview.getId(),
+                    savedInterview.getRoomId()
+            );
+        }
+
+        return savedInterview;
     }
 
     // Current rooms
@@ -369,9 +401,22 @@ public class InterviewService {
 
         // Save interview
 
-        return interviewRepository.save(
+        Interview savedInterview = interviewRepository.save(
                 interview
         );
+
+        if (notificationService != null && savedInterview.getCandidateJoinedAt() == null) {
+            notificationService.createAndSendNotification(
+                    savedInterview.getCandidateId(),
+                    NotificationType.INTERVIEWER_WAITING,
+                    "Interviewer is Waiting",
+                    "Your interviewer is waiting for you to join the interview.",
+                    savedInterview.getId(),
+                    savedInterview.getRoomId()
+            );
+        }
+
+        return savedInterview;
     }
 
     // Join interview
@@ -515,6 +560,41 @@ public class InterviewService {
             }
         }
 
+        // Send notifications for interview completion and pending evaluation
+        if (notificationService != null) {
+            // Notify Candidate
+            notificationService.createAndSendNotification(
+                    savedInterview.getCandidateId(),
+                    NotificationType.INTERVIEW_COMPLETED,
+                    "Interview Completed",
+                    "Your interview \"" + savedInterview.getTitle() + "\" has been completed.",
+                    savedInterview.getId(),
+                    savedInterview.getRoomId()
+            );
+
+            // Notify Interviewer
+            notificationService.createAndSendNotification(
+                    savedInterview.getInterviewerId(),
+                    NotificationType.INTERVIEW_COMPLETED,
+                    "Interview Completed",
+                    "The interview \"" + savedInterview.getTitle() + "\" has been completed.",
+                    savedInterview.getId(),
+                    savedInterview.getRoomId()
+            );
+
+            // Evaluation Pending notification for Interviewer
+            if (savedInterview.getCandidateScore() == null) {
+                notificationService.createAndSendNotification(
+                        savedInterview.getInterviewerId(),
+                        NotificationType.EVALUATION_PENDING,
+                        "Evaluation Pending",
+                        "You have an interview evaluation waiting for your review.",
+                        savedInterview.getId(),
+                        savedInterview.getRoomId()
+                );
+            }
+        }
+
         return savedInterview;
     }
 
@@ -632,6 +712,29 @@ public class InterviewService {
         }
         interview.setUpdatedAt(now);
         interviewRepository.save(interview);
+
+        // Send notification to the score recipient
+        if (notificationService != null) {
+            if (isInterviewer) {
+                notificationService.createAndSendNotification(
+                        recipientUserId,
+                        NotificationType.INTERVIEW_SCORE_RECEIVED,
+                        "Interview Score Received",
+                        "Your interviewer submitted your interview score.",
+                        interview.getId(),
+                        interview.getRoomId()
+                );
+            } else {
+                notificationService.createAndSendNotification(
+                        recipientUserId,
+                        NotificationType.CANDIDATE_REVIEW_RECEIVED,
+                        "Candidate Review Received",
+                        currentUser.getName() + " submitted their interview review.",
+                        interview.getId(),
+                        interview.getRoomId()
+                );
+            }
+        }
 
         return savedScore;
     }
