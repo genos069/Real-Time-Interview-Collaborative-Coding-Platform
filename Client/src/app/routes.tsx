@@ -66,10 +66,10 @@ export const router = createBrowserRouter([
         path: "/ai-mock",
         Component: BotHome,
       },
-      {
-        path: "/codeeditor",
-        Component: CodeEditor,
-      },
+      // {
+      //   path: "/codeeditor",
+      //   Component: CodeEditor,
+      // },
       {
         path: "/codeeditor/:id",
         Component: CodeEditor,
