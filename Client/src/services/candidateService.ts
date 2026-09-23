@@ -113,8 +113,5 @@ export const deleteTargetApi = async (id: string) => {
 
 export const getQuestionById = async (id: string) => {
   const { data } = await API.get(`/code-editor/questions/${id}`);
-
-  // console.log("Question Response:", data);
-
   return data;
 };

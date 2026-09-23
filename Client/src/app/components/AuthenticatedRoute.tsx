@@ -6,14 +6,7 @@ export default function AuthenticatedRoute() {
   const token = localStorage.getItem("token");
   const userString = localStorage.getItem("user");
 
-  console.log("AuthenticatedRoute:", {
-    token: !!token,
-    userString,
-  });
-
   if (!token || !userString) {
-    console.log("AuthenticatedRoute: NOT AUTHENTICATED");
-
     return (
       <Navigate
         to={`/auth?redirect=${encodeURIComponent(location.pathname)}`}
@@ -26,15 +19,9 @@ export default function AuthenticatedRoute() {
     const user = JSON.parse(userString);
     const role = user.role?.toUpperCase();
 
-    console.log("AuthenticatedRoute role:", role);
-
     if (role !== "CANDIDATE" && role !== "INTERVIEWER") {
-      console.log("AuthenticatedRoute: INVALID ROLE");
-
       return <Navigate to="/auth" replace />;
     }
-
-    console.log("AuthenticatedRoute: ALLOWED");
 
     return <Outlet />;
   } catch (error) {

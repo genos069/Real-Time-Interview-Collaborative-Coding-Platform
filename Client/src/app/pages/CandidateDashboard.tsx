@@ -522,10 +522,6 @@ function DashboardSection({
       },
     ]
     : [];
-  //temp
-  console.log("Dashboard Stats:", stats);
-  console.log("Coding Time:", stats.codingTimeSeconds);
-  console.log("Type:", typeof stats.codingTimeSeconds);
   return (
     <div>
       <SectionHeader
@@ -864,16 +860,7 @@ function PracticeSection({ questions }: { questions: PracticeQuestion[] }) {
                 {q.difficulty.charAt(0) + q.difficulty.slice(1).toLowerCase()}
               </span>
               <button
-                // onClick={() => navigate(`/codeeditor/${q.id}`)}
                 onClick={async () => {
-                  // console.log("Question ID:", q.id);
-
-                  try {
-                    const data = await getQuestionById(q.id);
-                    // console.log("Returned Data:", data);
-                  } catch (err) {
-                    console.error(err);
-                  }
 
                   navigate(`/codeeditor/${q.id}`);
                 }}
@@ -1967,8 +1954,6 @@ export default function CandidateDashboard() {
           const latest = history[0];
 
           const details = await getInterviewById(latest.id);
-
-          // console.log("Latest interview:", details);
 
           setLatestInterview(details);
         }
