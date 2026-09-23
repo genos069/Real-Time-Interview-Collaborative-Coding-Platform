@@ -132,7 +132,6 @@ function ProblemDescription({ questionId }: ProblemDescriptionProps) {
             try {
                 setLoading(true);
                 const data = await getQuestion(questionId);
-                console.log("Fetched Question Data:", data); // Log the fetched data for debugging
                 setProblem(data);
             } catch (error) {
                 console.error("Failed to load question:", error);
@@ -288,8 +287,6 @@ export default function CodeEditor() {
     const [resultType, setResultType] = useState<"run" | "submit">("run");
 
     const { id: questionId } = useParams<{ id: string }>();
-    //temp
-    console.log("Question ID:", questionId);
     const [testCases, setTestCases] = useState<any[]>([]);
     const currentTestCase = testCases[activeCase];
 

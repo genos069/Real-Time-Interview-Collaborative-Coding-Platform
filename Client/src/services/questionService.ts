@@ -7,7 +7,6 @@ export const getQuestion = async (questionId: string) => {
   const response = await API.get(
     `/code-editor/questions/${questionId}`
   );
-  console.log("Question Details:", response.data); // Log the response data for debugging
   return response.data;
 };
 
