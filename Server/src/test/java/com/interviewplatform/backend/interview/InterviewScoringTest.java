@@ -126,7 +126,6 @@ class InterviewScoringTest {
         candidateUser.setName("Bob Candidate");
         candidateUser.setEmail("bob@candidate.com");
         candidateUser.setRole("candidate");
-        candidateUser.setReadinessScore(88);
 
         completedInterview = new Interview();
         completedInterview.setId(interviewDocId);
@@ -439,6 +438,9 @@ class InterviewScoringTest {
 
         // 4 AI mock interviews
         com.interviewplatform.backend.bot.entity.Interview mock1 = new com.interviewplatform.backend.bot.entity.Interview();
+        com.interviewplatform.backend.bot.entity.Interview.Evaluation eval = new com.interviewplatform.backend.bot.entity.Interview.Evaluation();
+        eval.setOverallScore(88);
+        mock1.setEvaluation(eval);
         com.interviewplatform.backend.bot.entity.Interview mock2 = new com.interviewplatform.backend.bot.entity.Interview();
         com.interviewplatform.backend.bot.entity.Interview mock3 = new com.interviewplatform.backend.bot.entity.Interview();
         com.interviewplatform.backend.bot.entity.Interview mock4 = new com.interviewplatform.backend.bot.entity.Interview();

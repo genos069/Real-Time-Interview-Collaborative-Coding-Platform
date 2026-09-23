@@ -803,7 +803,6 @@ function CurrentRoomsSection({
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-[#4a6080]">Candidate: {room.candidateEmail} · Role: {room.targetRole}</p>
-                    <p className="mt-2 text-xs text-[#4a6080] font-mono bg-[#f0f4f8] px-2 py-0.5 rounded inline-block">Room ID: {room.roomId}</p>
                   </div>
                 </div>
                 <button
@@ -1179,7 +1178,7 @@ export default function InterviewerDashboard() {
 
   const handleRoomCreated = (createdRoom: InterviewDetailsResponse) => {
     setRoomCreatedSuccessMessage(
-      `Interview room "${createdRoom.title}" (${createdRoom.roomId}) created successfully for ${createdRoom.candidateEmail || createdRoom.candidateId}!`
+      `Interview room "${createdRoom.title}" created successfully for ${createdRoom.candidateEmail || createdRoom.candidateId}!`
     );
     setRoomsRefreshTrigger((prev) => prev + 1);
     setActiveSection("rooms");

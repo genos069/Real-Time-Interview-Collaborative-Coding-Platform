@@ -9,6 +9,8 @@ import com.interviewplatform.backend.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -17,6 +19,8 @@ import java.util.List;
 
 @Service
 public class NotificationService {
+
+    private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
 
     private final NotificationRepository notificationRepository;
     private final SimpMessagingTemplate messagingTemplate;
@@ -72,7 +76,7 @@ public class NotificationService {
             try {
                 messagingTemplate.convertAndSend("/topic/notifications/" + recipientUserId, saved);
             } catch (Exception e) {
-                System.err.println("Failed to send real-time notification to user " + recipientUserId + ": " + e.getMessage());
+                log.warn("Failed to send real-time notification to user {}: {}", recipientUserId, e.getMessage());
             }
         }
 

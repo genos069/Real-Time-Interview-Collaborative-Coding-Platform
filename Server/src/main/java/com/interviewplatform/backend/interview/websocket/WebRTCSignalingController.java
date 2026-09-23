@@ -9,11 +9,15 @@ import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.handler.annotation.SendTo;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
 
 @Controller
 public class WebRTCSignalingController {
+
+    private static final Logger log = LoggerFactory.getLogger(WebRTCSignalingController.class);
 
     private final UserService userService;
     private final InterviewRepository interviewRepository;
@@ -114,11 +118,11 @@ public class WebRTCSignalingController {
             response.setRaised(message.getRaised());
         }
 
-        System.out.println(
-                "Relaying WebRTC " + response.getType()
-                        + " for room: " + roomId
-                        + " from " + user.getRole() + " (" + user.getId() + ")"
-        );
+        if ("ICE_CANDIDATE".equalsIgnoreCase(response.getType())) {
+            log.debug("Relaying WebRTC {} for room: {} from {}", response.getType(), roomId, user.getRole());
+        } else {
+            log.info("Relaying WebRTC {} for room: {} from {}", response.getType(), roomId, user.getRole());
+        }
 
         return response;
     }

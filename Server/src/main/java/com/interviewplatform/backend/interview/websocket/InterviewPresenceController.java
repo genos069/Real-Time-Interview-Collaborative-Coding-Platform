@@ -13,10 +13,14 @@ import org.springframework.messaging.handler.annotation.SendTo;
 
 import org.springframework.security.core.Authentication;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Controller;
 
 @Controller
 public class InterviewPresenceController {
+
+    private static final Logger log = LoggerFactory.getLogger(InterviewPresenceController.class);
 
     private final UserService userService;
 
@@ -60,11 +64,6 @@ public class InterviewPresenceController {
                     "WebSocket authentication is missing"
             );
         }
-
-        System.out.println(
-                "JOIN request authenticated as: "
-                        + authentication.getName()
-        );
 
         /*
          * ============================================================
@@ -182,14 +181,7 @@ public class InterviewPresenceController {
         presence.setRole(user.getRole());
         presence.setEvent("JOINED");
 
-        System.out.println(
-                "User joined interview room: "
-                        + roomId
-                        + " | "
-                        + user.getRole()
-                        + " | "
-                        + user.getId()
-        );
+        log.info("User joined interview room {}: {} ({})", roomId, user.getEmail(), user.getRole());
 
         /*
          * Trigger notifications for real-time interview presence events
@@ -309,14 +301,7 @@ public class InterviewPresenceController {
         presence.setRole(user.getRole());
         presence.setEvent("LEFT");
 
-        System.out.println(
-                "User left interview room: "
-                        + roomId
-                        + " | "
-                        + user.getRole()
-                        + " | "
-                        + user.getId()
-        );
+        log.info("User left interview room {}: {} ({})", roomId, user.getEmail(), user.getRole());
 
         return presence;
     }

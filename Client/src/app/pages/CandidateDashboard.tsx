@@ -75,7 +75,25 @@ export interface UserProfile {
   location: string | null;
   avatar: string | null;
   about: string | null;
-  readinessScore: number;
+  readinessScore?: number;
+}
+
+export function computeAverageMockScore(
+  interviewHistory: any[],
+  latestInterview?: any,
+): number {
+  if (Array.isArray(interviewHistory) && interviewHistory.length > 0) {
+    const total = interviewHistory.reduce(
+      (sum, item) => sum + (typeof item?.score === "number" ? item.score : 0),
+      0,
+    );
+    return Math.round(total / interviewHistory.length);
+  }
+  const readiness = latestInterview?.evaluation?.overallScore;
+  if (typeof readiness === "number" && readiness > 0) {
+    return Math.round(readiness);
+  }
+  return 0;
 }
 
 // Dashboard Stats
@@ -471,13 +489,10 @@ function DashboardSection({
   const readinessScore = latestInterview?.evaluation?.overallScore ?? 0;
   const totalMocks = interviewHistory.length;
 
-  const averageScore =
-    interviewHistory.length > 0
-      ? Math.round(
-        interviewHistory.reduce((sum, item) => sum + item.score, 0) /
-        interviewHistory.length,
-      )
-      : 0;
+  const averageScore = computeAverageMockScore(
+    interviewHistory,
+    latestInterview,
+  );
 
   const progressHistory = interviewHistory
     .slice()
@@ -576,7 +591,7 @@ function DashboardSection({
             >
               {selectedScoreType === "real"
                 ? (realScore != null ? String(Math.round(realScore)) : "N/A")
-                : (interviewHistory.length > 0 ? String(averageScore) : (readinessScore > 0 ? String(readinessScore) : "0"))}
+                : String(averageScore)}
             </div>
 
             <div className="text-sm text-[#0d1b2a]/80 font-medium">
@@ -1324,12 +1339,20 @@ function CurrentRoomsSection() {
 
 function ProfileSection({
   data,
+  interviewHistory = [],
+  latestInterview,
   onEdit,
 }: {
   data: DashboardResponse;
+  interviewHistory?: any[];
+  latestInterview?: any;
   onEdit: () => void;
 }) {
   const { user, skills = [], targets = [], experience = [], stats } = data;
+  const averageMockScore = computeAverageMockScore(
+    interviewHistory,
+    latestInterview,
+  );
   const initials = user.name
     .split(" ")
     .map((p) => p[0])
@@ -1388,7 +1411,7 @@ function ProfileSection({
           <div className="w-full border-t border-[#0d1b2a]/8 pt-4">
             <div className="grid grid-cols-3 gap-2 text-center">
               {[
-                { v: String(user.readinessScore), l: "Score" },
+                { v: String(averageMockScore), l: "Score" },
                 { v: String(stats.mockSessions), l: "Mocks" },
                 { v: String(stats.questionsSolved), l: "Solved" },
               ].map(({ v, l }) => (
@@ -2073,6 +2096,8 @@ export default function CandidateDashboard() {
         return (
           <ProfileSection
             data={dashboardData}
+            interviewHistory={interviewHistory}
+            latestInterview={latestInterview}
             onEdit={() => setActiveSection("edit-profile")}
           />
         );

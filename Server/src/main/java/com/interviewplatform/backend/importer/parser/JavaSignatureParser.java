@@ -16,30 +16,32 @@ public class JavaSignatureParser {
 
     private static final Pattern METHOD_PATTERN =
             Pattern.compile(
-                    "public\\s+([\\w\\[\\]]+)\\s+(\\w+)\\s*\\(([^)]*)\\)"
+                    "public\\s+([a-zA-Z0-9_\\[\\]<>,\\s]+?)\\s+([a-zA-Z0-9_]+)\\s*\\(([^)]*)\\)"
             );
 
     public ExecutionMetadata parse(String javaCode) {
 
         ExecutionMetadata metadata = new ExecutionMetadata();
+        String cleanCode = stripComments(javaCode);
 
         // Class Name
-        Matcher classMatcher = CLASS_PATTERN.matcher(javaCode);
+        Matcher classMatcher = CLASS_PATTERN.matcher(cleanCode);
 
         if (classMatcher.find()) {
             metadata.setClassName(classMatcher.group(1));
         }
 
         // Method Signature
-        Matcher methodMatcher = METHOD_PATTERN.matcher(javaCode);
+        Matcher methodMatcher = METHOD_PATTERN.matcher(cleanCode);
 
         if (methodMatcher.find()) {
 
-            // Return Type
-            metadata.setReturnType(methodMatcher.group(1));
+            // Return Type (normalized)
+            String returnType = methodMatcher.group(1).trim().replaceAll("\\s+", "");
+            metadata.setReturnType(returnType);
 
             // Method Name
-            metadata.setMethodName(methodMatcher.group(2));
+            metadata.setMethodName(methodMatcher.group(2).trim());
 
             // Parameters
             String parameters = methodMatcher.group(3).trim();
@@ -49,18 +51,21 @@ public class JavaSignatureParser {
 
             if (!parameters.isEmpty()) {
 
-                String[] params = parameters.split(",");
+                List<String> params = splitParameters(parameters);
 
                 for (String parameter : params) {
 
                     parameter = parameter.trim();
 
-                    String[] parts = parameter.split("\\s+");
+                    int lastSpace = parameter.lastIndexOf(' ');
 
-                    if (parts.length >= 2) {
+                    if (lastSpace != -1) {
 
-                        parameterTypes.add(parts[0]);
-                        parameterNames.add(parts[1]);
+                        String type = parameter.substring(0, lastSpace).trim().replaceAll("\\s+", "");
+                        String name = parameter.substring(lastSpace + 1).trim();
+
+                        parameterTypes.add(type);
+                        parameterNames.add(name);
                     }
                 }
             }
@@ -70,5 +75,50 @@ public class JavaSignatureParser {
         }
 
         return metadata;
+    }
+
+    private List<String> splitParameters(String parameters) {
+
+        List<String> result = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        int genericDepth = 0;
+        int bracketDepth = 0;
+
+        for (char c : parameters.toCharArray()) {
+
+            if (c == '<') {
+                genericDepth++;
+            } else if (c == '>') {
+                genericDepth--;
+            } else if (c == '[') {
+                bracketDepth++;
+            } else if (c == ']') {
+                bracketDepth--;
+            } else if (c == ',' && genericDepth == 0 && bracketDepth == 0) {
+
+                String token = current.toString().trim();
+                if (!token.isEmpty()) {
+                    result.add(token);
+                }
+                current.setLength(0);
+                continue;
+            }
+
+            current.append(c);
+        }
+
+        String token = current.toString().trim();
+        if (!token.isEmpty()) {
+            result.add(token);
+        }
+
+        return result;
+    }
+
+    private String stripComments(String code) {
+        if (code == null) {
+            return "";
+        }
+        return code.replaceAll("(?s)/\\*.*?\\*/", " ").replaceAll("//.*", " ");
     }
 }

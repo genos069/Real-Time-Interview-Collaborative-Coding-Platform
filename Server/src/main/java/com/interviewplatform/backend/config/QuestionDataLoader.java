@@ -5,6 +5,8 @@ import com.interviewplatform.backend.importer.dto.ExampleJson;
 import com.interviewplatform.backend.importer.dto.ProblemJson;
 import com.interviewplatform.backend.model.*;
 import com.interviewplatform.backend.repository.QuestionRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
@@ -17,6 +19,8 @@ import java.util.List;
 
 @Component
 public class QuestionDataLoader implements CommandLineRunner {
+
+    private static final Logger log = LoggerFactory.getLogger(QuestionDataLoader.class);
 
     private final QuestionRepository questionRepository;
     private final ObjectMapper objectMapper;
@@ -39,7 +43,7 @@ public class QuestionDataLoader implements CommandLineRunner {
     public void run(String... args) throws Exception {
 
         if (questionRepository.count() > 0) {
-            System.out.println("Questions already exist. Skipping import.");
+            log.info("Questions already exist in database. Skipping dataset import.");
             return;
         }
 
@@ -162,13 +166,13 @@ public class QuestionDataLoader implements CommandLineRunner {
 
             } catch (Exception e) {
 
-                System.out.println("Failed: " + resource.getFilename());
+                log.error("Failed to import problem from {}: {}", resource.getFilename(), e.getMessage());
 
             }
 
         }
 
-        System.out.println("Imported " + questionRepository.count() + " questions.");
+        log.info("Dataset import complete. Total questions: {}", questionRepository.count());
 
     }
 

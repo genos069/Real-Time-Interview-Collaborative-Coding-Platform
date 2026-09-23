@@ -9,6 +9,8 @@ import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.handler.annotation.SendTo;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
 
@@ -17,6 +19,8 @@ import java.util.UUID;
 
 @Controller
 public class InterviewWhiteboardController {
+
+    private static final Logger log = LoggerFactory.getLogger(InterviewWhiteboardController.class);
 
     private final UserService userService;
     private final InterviewRepository interviewRepository;
@@ -124,11 +128,7 @@ public class InterviewWhiteboardController {
         response.setPoints(message.getPoints());
         response.setTimestamp(Instant.now().toString());
 
-        System.out.println(
-                "Relaying whiteboard " + response.getType()
-                        + " for room: " + roomId
-                        + " from " + user.getRole() + " (" + user.getId() + ")"
-        );
+        log.debug("Relaying whiteboard {} for room: {} from {}", response.getType(), roomId, user.getRole());
 
         return response;
     }

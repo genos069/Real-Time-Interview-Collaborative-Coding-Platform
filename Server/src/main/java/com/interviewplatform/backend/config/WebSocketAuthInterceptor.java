@@ -12,12 +12,16 @@ import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
 @Component
 public class WebSocketAuthInterceptor implements ChannelInterceptor {
+
+    private static final Logger log = LoggerFactory.getLogger(WebSocketAuthInterceptor.class);
 
     private final JwtUtil jwtUtil;
 
@@ -120,12 +124,7 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
                 );
             }
 
-            System.out.println(
-                    "WebSocket authenticated: "
-                            + email
-                            + " | role="
-                            + role
-            );
+            log.info("WebSocket connection authenticated for user: {}", email);
 
             return message;
         }
@@ -180,13 +179,6 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
                      * Restore Authentication for this message.
                      */
                     accessor.setUser(authentication);
-
-                    System.out.println(
-                            "WebSocket authentication restored: "
-                                    + email
-                                    + " | role="
-                                    + role
-                    );
                 }
             }
         }

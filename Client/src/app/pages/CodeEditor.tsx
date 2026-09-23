@@ -6,8 +6,7 @@ import {
     Play, Send, ChevronDown, CheckCircle, XCircle,
     Clock, Cpu, RotateCcw, Bookmark, Plus,
     Code2, FlaskConical, Terminal, Loader2, Tag,
-    ThumbsUp, MessageSquare, FileText,
-    ChevronLeft, ChevronRight,
+    FileText,
 } from "lucide-react";
 import {
     getQuestion,
@@ -64,7 +63,7 @@ interface RunResult {
 
 
 
-const LANGUAGES = ["Python3", "JavaScript", "C++", "Java"];
+const LANGUAGES = ["Python3", "C++", "Java"];
 const MONACO_LANGUAGES: Record<string, string> = {
     Python3: "python",
     JavaScript: "javascript",
@@ -742,17 +741,17 @@ export default function CodeEditor() {
                                                     className="rounded-md p-3 border"
                                                     style={{
                                                         backgroundColor:
-                                                            result.passedTestCases === result.totalTestCases
+                                                            result.status === "Accepted"
                                                                 ? "rgba(63,185,80,0.08)"
                                                                 : "rgba(248,81,73,0.08)",
                                                         borderColor:
-                                                            result.passedTestCases === result.totalTestCases
+                                                            result.status === "Accepted"
                                                                 ? "rgba(63,185,80,0.25)"
                                                                 : "rgba(248,81,73,0.25)",
                                                     }}
                                                 >
                                                     <div className="flex items-center gap-2 mb-1">
-                                                        {result.passedTestCases === result.totalTestCases ? (
+                                                        {result.status === "Accepted" ? (
                                                             <CheckCircle size={15} style={{ color: "#3fb950" }} />
                                                         ) : (
                                                             <XCircle size={15} style={{ color: "#f85149" }} />
@@ -761,13 +760,11 @@ export default function CodeEditor() {
                                                             className="font-semibold text-sm"
                                                             style={{
                                                                 color:
-                                                                    result.passedTestCases === result.totalTestCases ? "#3fb950" : "#f85149",
+                                                                    result.status === "Accepted" ? "#3fb950" : "#f85149",
                                                             }}
                                                         >
-                              {result.passedTestCases === result.totalTestCases
-                                  ? "Accepted"
-                                  : "Wrong Answer"}
-                            </span>
+                                                            {result.status || (result.passedTestCases === result.totalTestCases ? "Accepted" : "Wrong Answer")}
+                                                        </span>
                                                     </div>
                                                     <p className="text-xs text-muted-foreground mb-2">
                                                         {result.passedTestCases} / {result.totalTestCases} test cases passed
@@ -787,15 +784,27 @@ export default function CodeEditor() {
                                                 </div>
                                             ) : (
                                                 <div className="flex items-center gap-2 py-1">
-
-                                                    <CheckCircle
-                                                        size={14}
-                                                        style={{ color: "#3fb950" }}
-                                                    />
-
-                                                    <span className="text-sm font-medium text-green-500">
-                                                        Code Executed Successfully
-                                                    </span>
+                                                    {result.status === "success" || result.status === "Accepted" ? (
+                                                        <>
+                                                            <CheckCircle
+                                                                size={14}
+                                                                style={{ color: "#3fb950" }}
+                                                            />
+                                                            <span className="text-sm font-medium text-green-500">
+                                                                Code Executed Successfully
+                                                            </span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <XCircle
+                                                                size={14}
+                                                                style={{ color: "#f85149" }}
+                                                            />
+                                                            <span className="text-sm font-medium text-red-500">
+                                                                {result.status || "Execution Failed"}
+                                                            </span>
+                                                        </>
+                                                    )}
 
                                                     <span className="text-xs text-muted-foreground ml-auto flex items-center gap-1">
                                                         <Clock size={10} />
