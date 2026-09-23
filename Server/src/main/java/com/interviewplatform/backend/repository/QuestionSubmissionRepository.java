@@ -1,6 +1,7 @@
 package com.interviewplatform.backend.repository;
 
 import com.interviewplatform.backend.model.QuestionSubmission;
+import com.interviewplatform.backend.model.SubmissionStatus;
 import org.springframework.data.mongodb.repository.Aggregation;
 import org.springframework.data.mongodb.repository.MongoRepository;
 
@@ -12,6 +13,11 @@ public interface QuestionSubmissionRepository extends MongoRepository<QuestionSu
     List<QuestionSubmission> findByUserId(String userId);
 
     List<QuestionSubmission> findByQuestionId(String questionId);
+
+    List<QuestionSubmission> findByUserIdAndStatus(
+            String userId,
+            SubmissionStatus status
+    );
 
     Optional<QuestionSubmission> findByUserIdAndQuestionId(
             String userId,

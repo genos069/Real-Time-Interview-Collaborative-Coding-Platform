@@ -9,6 +9,8 @@ import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.handler.annotation.SendTo;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
 
@@ -17,6 +19,8 @@ import java.util.UUID;
 
 @Controller
 public class InterviewChatController {
+
+    private static final Logger log = LoggerFactory.getLogger(InterviewChatController.class);
 
     private final UserService userService;
     private final InterviewRepository interviewRepository;
@@ -114,10 +118,7 @@ public class InterviewChatController {
         response.setText(message.getText().trim());
         response.setTimestamp(Instant.now().toString());
 
-        System.out.println(
-                "Relaying chat message for room: " + roomId
-                        + " from " + user.getRole() + " (" + user.getId() + ")"
-        );
+        log.info("Relaying chat message in room: {} from {} ({})", roomId, user.getEmail(), user.getRole());
 
         return response;
     }

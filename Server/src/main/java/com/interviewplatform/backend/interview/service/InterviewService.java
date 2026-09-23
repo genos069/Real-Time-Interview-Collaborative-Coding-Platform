@@ -21,6 +21,8 @@ import com.interviewplatform.backend.bot.exception.ApiException;
 import com.interviewplatform.backend.notification.model.NotificationType;
 import com.interviewplatform.backend.notification.service.NotificationService;
 import com.interviewplatform.backend.service.UserService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
@@ -38,6 +40,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class InterviewService {
+
+    private static final Logger log = LoggerFactory.getLogger(InterviewService.class);
 
     private final InterviewRepository interviewRepository;
 
@@ -405,6 +409,8 @@ public class InterviewService {
                 interview
         );
 
+        log.info("Interview room {} started by interviewer {}", roomId, interviewer.getEmail());
+
         if (notificationService != null && savedInterview.getCandidateJoinedAt() == null) {
             notificationService.createAndSendNotification(
                     savedInterview.getCandidateId(),
@@ -540,6 +546,8 @@ public class InterviewService {
         // Save interview
         Interview savedInterview = interviewRepository.save(interview);
 
+        log.info("Interview room {} completed by interviewer {}", roomId, interviewer.getEmail());
+
         // Broadcast real-time completion event to room topic
         if (messagingTemplate != null) {
             try {
@@ -556,7 +564,7 @@ public class InterviewService {
                         eventMessage
                 );
             } catch (Exception e) {
-                System.err.println("Failed to broadcast interview completion event: " + e.getMessage());
+                log.warn("Failed to broadcast interview completion event for room {}: {}", roomId, e.getMessage());
             }
         }
 

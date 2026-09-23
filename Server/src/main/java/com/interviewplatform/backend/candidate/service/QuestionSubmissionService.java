@@ -6,7 +6,11 @@ import com.interviewplatform.backend.repository.QuestionSubmissionRepository;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class QuestionSubmissionService {
@@ -67,6 +71,19 @@ public class QuestionSubmissionService {
                 .orElse(false);
     }
 
+    public Set<String> getSolvedQuestionIds(String userId) {
+        if (userId == null) {
+            return Set.of();
+        }
+
+        return questionSubmissionRepository
+                .findByUserIdAndStatus(userId, SubmissionStatus.SOLVED)
+                .stream()
+                .map(QuestionSubmission::getQuestionId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+    }
+
     public long getSolvedCount(String userId) {
 
         return questionSubmissionRepository
@@ -83,5 +100,53 @@ public class QuestionSubmissionService {
                 questionSubmissionRepository.getTotalCodingTimeSeconds(userId);
 
         return totalCodingTime == null ? 0L : totalCodingTime;
+    }
+
+    // Consolidated stats (single query to avoid 3 separate round trips)
+    public UserSubmissionStats getUserSubmissionStats(String userId) {
+        if (userId == null) {
+            return new UserSubmissionStats(0L, 0L, Set.of());
+        }
+
+        List<QuestionSubmission> submissions = questionSubmissionRepository.findByUserId(userId);
+        long solvedCount = 0;
+        long totalCodingTime = 0;
+        Set<String> solvedQuestionIds = new java.util.HashSet<>();
+
+        for (QuestionSubmission s : submissions) {
+            totalCodingTime += s.getCodingTimeSeconds();
+            if (s.getStatus() == SubmissionStatus.SOLVED) {
+                solvedCount++;
+                if (s.getQuestionId() != null) {
+                    solvedQuestionIds.add(s.getQuestionId());
+                }
+            }
+        }
+
+        return new UserSubmissionStats(solvedCount, totalCodingTime, solvedQuestionIds);
+    }
+
+    public static class UserSubmissionStats {
+        private final long solvedCount;
+        private final long totalCodingTimeSeconds;
+        private final Set<String> solvedQuestionIds;
+
+        public UserSubmissionStats(long solvedCount, long totalCodingTimeSeconds, Set<String> solvedQuestionIds) {
+            this.solvedCount = solvedCount;
+            this.totalCodingTimeSeconds = totalCodingTimeSeconds;
+            this.solvedQuestionIds = solvedQuestionIds;
+        }
+
+        public long getSolvedCount() {
+            return solvedCount;
+        }
+
+        public long getTotalCodingTimeSeconds() {
+            return totalCodingTimeSeconds;
+        }
+
+        public Set<String> getSolvedQuestionIds() {
+            return solvedQuestionIds;
+        }
     }
 }

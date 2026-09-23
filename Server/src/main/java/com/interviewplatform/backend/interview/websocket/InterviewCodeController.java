@@ -10,11 +10,15 @@ import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.handler.annotation.SendTo;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
 
 @Controller
 public class InterviewCodeController {
+
+    private static final Logger log = LoggerFactory.getLogger(InterviewCodeController.class);
 
     private final UserService userService;
     private final InterviewRepository interviewRepository;
@@ -122,11 +126,7 @@ public class InterviewCodeController {
         response.setLanguage(language);
         response.setCursorPosition(message.getCursorPosition());
 
-        System.out.println(
-                "Relaying code sync for room: " + roomId
-                        + " from " + user.getRole() + " (" + user.getId() + ")"
-                        + " | lang=" + language
-        );
+        log.debug("Relaying code sync for room: {} from {} | lang={}", roomId, user.getRole(), language);
 
         return response;
     }

@@ -15,6 +15,7 @@ import com.interviewplatform.backend.candidate.dto.codeeditor.TestCaseResponse;
 import com.interviewplatform.backend.model.TestCase;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 
 @Service
@@ -36,27 +37,45 @@ public class PracticeQuestionService {
 
     // Get Practice Questions
     public List<PracticeQuestionResponse> getPracticeQuestions(String difficulty) {
+        return getPracticeQuestions(difficulty, 0);
+    }
 
+    public List<PracticeQuestionResponse> getPracticeQuestions(String difficulty, int limit) {
         User user = userService.getLoggedInUser();
+        Set<String> solvedQuestionIds = user != null
+                ? questionSubmissionService.getSolvedQuestionIds(user.getId())
+                : java.util.Collections.emptySet();
+        return getPracticeQuestions(difficulty, limit, solvedQuestionIds);
+    }
 
+    public List<PracticeQuestionResponse> getPracticeQuestions(String difficulty, int limit, Set<String> solvedQuestionIds) {
         List<Question> questions;
 
-        if (difficulty == null || difficulty.isBlank()) {
-            questions = questionRepository.findAll();
+        if (limit > 0) {
+            org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(0, limit);
+            if (difficulty == null || difficulty.isBlank()) {
+                questions = questionRepository.findSummary(pageable);
+            } else {
+                questions = questionRepository.findByDifficultySummary(
+                        Difficulty.valueOf(difficulty.toUpperCase()),
+                        pageable
+                );
+            }
         } else {
-            questions = questionRepository.findByDifficulty(
-                    Difficulty.valueOf(difficulty.toUpperCase())
-            );
+            if (difficulty == null || difficulty.isBlank()) {
+                questions = questionRepository.findAllSummary();
+            } else {
+                questions = questionRepository.findByDifficultySummary(
+                        Difficulty.valueOf(difficulty.toUpperCase())
+                );
+            }
         }
 
-        List<PracticeQuestionResponse> response = new ArrayList<>();
+        List<PracticeQuestionResponse> response = new ArrayList<>(questions.size());
 
         for (Question question : questions) {
-
-            boolean solved = questionSubmissionService.isSolved(
-                    user.getId(),
-                    question.getId()
-            );
+            boolean solved = solvedQuestionIds != null
+                    && solvedQuestionIds.contains(question.getId());
 
             response.add(
                     new PracticeQuestionResponse(
@@ -73,6 +92,40 @@ public class PracticeQuestionService {
         }
 
         return response;
+    }
+
+    // Dashboard practice questions preview (uses dedicated bounded 50-question summary query)
+    public List<PracticeQuestionResponse> getDashboardPracticeQuestions(Set<String> solvedQuestionIds) {
+        List<Question> questions = questionRepository.findDashboardPracticeQuestionSummary();
+        List<PracticeQuestionResponse> response = new ArrayList<>(questions.size());
+
+        for (Question question : questions) {
+            boolean solved = solvedQuestionIds != null
+                    && solvedQuestionIds.contains(question.getId());
+
+            response.add(
+                    new PracticeQuestionResponse(
+                            question.getId(),
+                            question.getTitle(),
+                            question.getCategory(),
+                            question.getDifficulty().name(),
+                            solved,
+                            question.getEstimatedTime() == null
+                                    ? null
+                                    : question.getEstimatedTime() + " min"
+                    )
+            );
+        }
+
+        return response;
+    }
+
+    public List<PracticeQuestionResponse> getDashboardPracticeQuestions() {
+        User user = userService.getLoggedInUser();
+        Set<String> solvedQuestionIds = user != null
+                ? questionSubmissionService.getSolvedQuestionIds(user.getId())
+                : java.util.Collections.emptySet();
+        return getDashboardPracticeQuestions(solvedQuestionIds);
     }
 
     // Get Practice Progress

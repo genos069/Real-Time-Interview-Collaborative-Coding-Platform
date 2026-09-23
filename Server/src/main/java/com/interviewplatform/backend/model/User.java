@@ -37,9 +37,6 @@ public class User {
 
     private String about;
 
-    // Dashboard
-    private int readinessScore = 88;
-
     // Skills
     private List<String> skills = new ArrayList<>();
     // Targets

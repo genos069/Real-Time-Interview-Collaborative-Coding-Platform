@@ -1,5 +1,6 @@
 package com.interviewplatform.backend.candidate.service;
 
+import com.interviewplatform.backend.candidate.codegen.CppDriverGenerator;
 import com.interviewplatform.backend.candidate.codegen.JavaDriverGenerator;
 import com.interviewplatform.backend.candidate.codegen.PythonDriverGenerator;
 import com.interviewplatform.backend.candidate.dto.codeeditor.SubmitCodeResponse;
@@ -15,10 +16,14 @@ import com.interviewplatform.backend.service.UserService;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @Service
 public class SubmitCodeService {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SubmitCodeService.class);
 
     // Repositories
     private final QuestionRepository questionRepository;
@@ -28,6 +33,7 @@ public class SubmitCodeService {
     private final QuestionSubmissionService questionSubmissionService;
     private final JavaDriverGenerator javaDriverGenerator;
     private final PythonDriverGenerator pythonDriverGenerator;
+    private final CppDriverGenerator cppDriverGenerator;
 
     // Compiler
     private final OnlineCompilerClient onlineCompilerClient;
@@ -39,6 +45,7 @@ public class SubmitCodeService {
             QuestionSubmissionService questionSubmissionService,
             JavaDriverGenerator javaDriverGenerator,
             PythonDriverGenerator pythonDriverGenerator,
+            CppDriverGenerator cppDriverGenerator,
             OnlineCompilerClient onlineCompilerClient
     ) {
         this.questionRepository = questionRepository;
@@ -46,6 +53,7 @@ public class SubmitCodeService {
         this.questionSubmissionService = questionSubmissionService;
         this.javaDriverGenerator = javaDriverGenerator;
         this.pythonDriverGenerator = pythonDriverGenerator;
+        this.cppDriverGenerator = cppDriverGenerator;
         this.onlineCompilerClient = onlineCompilerClient;
     }
 
@@ -88,7 +96,11 @@ public class SubmitCodeService {
 
             case "cpp":
             case "c++":
-                sourceCode = request.getCode(); // Temporary
+                sourceCode = cppDriverGenerator.generate(
+                        request.getCode(),
+                        question.getExecutionMetadata(),
+                        testCases
+                );
                 break;
 
             default:
@@ -117,13 +129,26 @@ public class SubmitCodeService {
         response.setSubmittedAt(LocalDateTime.now());
 
 
-        // Runtime Error
-        if (compilerResponse.getError() != null &&
-                !compilerResponse.getError().isBlank()) {
+        if (compilerResponse != null) {
+            response.setOutput(compilerResponse.getOutput());
+            response.setError(compilerResponse.getError());
+        }
 
-            response.setStatus("Runtime Error");
+        String rawOutput = compilerResponse != null && compilerResponse.getOutput() != null
+                ? compilerResponse.getOutput().trim()
+                : "";
+        boolean isCaughtSyntaxError = rawOutput.startsWith("SyntaxError:")
+                || rawOutput.startsWith("CompilationError:")
+                || rawOutput.startsWith("IndentationError:");
+
+        if (isCaughtSyntaxError) {
+            response.setStatus("Compilation Error");
+            response.setError(rawOutput);
+            response.setOutput(null);
             response.setPassedTestCases(0);
-            response.setTotalTestCases(testCases.size());
+            response.setTotalTestCases(testCases != null ? testCases.size() : 0);
+
+            log.warn("Submit code execution syntax error for question {}: {}", questionId, rawOutput);
 
             questionSubmissionService.saveSubmission(
                     user.getId(),
@@ -131,22 +156,65 @@ public class SubmitCodeService {
                     request.getLanguage(),
                     request.getCode(),
                     0,
-                    testCases.size(),
+                    testCases != null ? testCases.size() : 0,
                     request.getCodingTimeSeconds()
             );
 
             return response;
         }
 
-// Judge Output
+        boolean isSuccess = compilerResponse != null && (
+                "success".equalsIgnoreCase(compilerResponse.getStatus()) ||
+                (compilerResponse.getExitCode() != null && compilerResponse.getExitCode() == 0)
+        );
+
+        // Execution Failure (Compilation Error or Runtime Error)
+        if (!isSuccess) {
+            String errorMsg = compilerResponse != null && compilerResponse.getError() != null
+                    ? compilerResponse.getError()
+                    : "";
+            Integer exitCode = compilerResponse != null ? compilerResponse.getExitCode() : null;
+
+            boolean isRuntimeError = errorMsg.contains("Exception in thread")
+                    || errorMsg.contains("java.lang.")
+                    || errorMsg.contains("at Main.")
+                    || errorMsg.contains("Internal error:")
+                    || (exitCode != null && exitCode > 128);
+
+            boolean isCompilationError = !isRuntimeError && (
+                    ((errorMsg.contains(": error:") || errorMsg.startsWith("error:") || errorMsg.contains("error: ") || errorMsg.contains("[ERROR]"))
+                     && !errorMsg.contains("Internal error:"))
+                    || (exitCode != null && exitCode == 1 && !errorMsg.contains("Exception"))
+            );
+
+            response.setStatus(isCompilationError ? "Compilation Error" : "Runtime Error");
+            log.warn("Submit code execution not successful for question {}: status={}, exitCode={}, error={}, output={}",
+                    questionId, compilerResponse != null ? compilerResponse.getStatus() : null, exitCode, errorMsg,
+                    compilerResponse != null ? compilerResponse.getOutput() : null);
+            response.setPassedTestCases(0);
+            response.setTotalTestCases(testCases != null ? testCases.size() : 0);
+
+            questionSubmissionService.saveSubmission(
+                    user.getId(),
+                    questionId,
+                    request.getLanguage(),
+                    request.getCode(),
+                    0,
+                    testCases != null ? testCases.size() : 0,
+                    request.getCodingTimeSeconds()
+            );
+
+            return response;
+        }
+
+        // Judge Output
         String output = compilerResponse.getOutput() == null
                 ? ""
                 : compilerResponse.getOutput().trim();
 
         String[] actualOutputs = output.split("\\R");
 
-        System.out.println("Test Cases      : " + testCases.size());
-        System.out.println("Actual Outputs  : " + actualOutputs.length);
+        log.debug("Judge execution for question {}: testCases={}, actualOutputs={}", questionId, testCases.size(), actualOutputs.length);
 
         int passed = 0;
 
@@ -161,27 +229,14 @@ public class SubmitCodeService {
                     .replaceAll("\\s+", "")
                     .trim();
 
-            boolean matched = false;
-
-            try {
-                double expectedNumber = Double.parseDouble(expected);
-                double actualNumber = Double.parseDouble(actual);
-
-                matched = Math.abs(expectedNumber - actualNumber) < 1e-9;
-
-            } catch (NumberFormatException e) {
-
-                // Not a number (arrays, strings, booleans, etc.)
-                matched = expected.equals(actual);
-            }
+            boolean matched = compareOutputs(expected, actual, question);
 
             if (matched) {
                 passed++;
             }
         }
 
-
-// Build Response
+        // Build Response
         response.setPassedTestCases(passed);
         response.setTotalTestCases(testCases.size());
 
@@ -200,9 +255,101 @@ public class SubmitCodeService {
                 passed,
                 testCases.size(),
                 request.getCodingTimeSeconds()
-        );;
+        );
 
         return response;
+    }
+
+    private boolean compareOutputs(String expected, String actual, Question question) {
+        if (expected.equals(actual)) {
+            return true;
+        }
+
+        if (expected.equalsIgnoreCase(actual)) {
+            return true;
+        }
+
+        try {
+            double expectedNumber = Double.parseDouble(expected);
+            double actualNumber = Double.parseDouble(actual);
+            return Math.abs(expectedNumber - actualNumber) < 1e-9;
+        } catch (NumberFormatException ignored) {
+        }
+
+        boolean allowsAnyOrder = question != null && (
+                (question.getDescription() != null && question.getDescription().toLowerCase().contains("any order"))
+                || (question.getSlug() != null && (
+                        question.getSlug().contains("n-queens")
+                        || question.getSlug().contains("subsets")
+                        || question.getSlug().contains("permutations")
+                        || question.getSlug().contains("combination-sum")
+                ))
+        );
+
+        if (allowsAnyOrder) {
+            return compareUnordered(expected, actual);
+        }
+
+        return false;
+    }
+
+    private boolean compareUnordered(String expected, String actual) {
+        if (!expected.startsWith("[") || !expected.endsWith("]")
+                || !actual.startsWith("[") || !actual.endsWith("]")) {
+            return false;
+        }
+
+        List<String> expectedItems = extractTopLevelItems(expected);
+        List<String> actualItems = extractTopLevelItems(actual);
+
+        if (expectedItems.size() != actualItems.size()) {
+            return false;
+        }
+
+        Collections.sort(expectedItems);
+        Collections.sort(actualItems);
+
+        return expectedItems.equals(actualItems);
+    }
+
+    private List<String> extractTopLevelItems(String input) {
+        List<String> items = new ArrayList<>();
+        if (input == null || input.length() <= 2) {
+            return items;
+        }
+
+        String inner = input.substring(1, input.length() - 1).trim();
+        if (inner.isEmpty()) {
+            return items;
+        }
+
+        int depth = 0;
+        StringBuilder current = new StringBuilder();
+
+        for (char c : inner.toCharArray()) {
+            if (c == '[' || c == '{' || c == '(') {
+                depth++;
+                current.append(c);
+            } else if (c == ']' || c == '}' || c == ')') {
+                depth--;
+                current.append(c);
+            } else if (c == ',' && depth == 0) {
+                String item = current.toString().trim();
+                if (!item.isEmpty()) {
+                    items.add(item);
+                }
+                current.setLength(0);
+            } else {
+                current.append(c);
+            }
+        }
+
+        String item = current.toString().trim();
+        if (!item.isEmpty()) {
+            items.add(item);
+        }
+
+        return items;
     }
 
     // Compiler

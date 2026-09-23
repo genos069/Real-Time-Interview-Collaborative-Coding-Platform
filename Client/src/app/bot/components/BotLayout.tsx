@@ -61,7 +61,7 @@ export default function BotLayout({
               <Video className="w-3.5 h-3.5 text-[#0d1b2a]" />
             </div>
             <span className="text-white text-base font-semibold tracking-tight">
-              Interview AI
+              CodeGear
             </span>
           </Link>
           <button
