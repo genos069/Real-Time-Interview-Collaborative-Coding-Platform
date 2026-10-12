@@ -17,6 +17,7 @@ export interface NotificationItem {
   message: string;
   relatedInterviewId?: string;
   roomId?: string;
+  interviewTitle?: string;
   read: boolean;
   createdAt: string;
 }
@@ -33,4 +34,12 @@ export const markNotificationAsRead = async (id: string): Promise<NotificationIt
 
 export const markAllNotificationsAsRead = async (): Promise<void> => {
   await API.put("/notifications/read-all");
+};
+
+export const deleteNotification = async (id: string): Promise<void> => {
+  await API.delete(`/notifications/${id}`);
+};
+
+export const clearAllNotifications = async (): Promise<void> => {
+  await API.delete("/notifications");
 };

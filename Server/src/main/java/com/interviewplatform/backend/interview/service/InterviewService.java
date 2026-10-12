@@ -577,7 +577,8 @@ public class InterviewService {
                     "Interview Completed",
                     "Your interview \"" + savedInterview.getTitle() + "\" has been completed.",
                     savedInterview.getId(),
-                    savedInterview.getRoomId()
+                    savedInterview.getRoomId(),
+                    savedInterview.getTitle()
             );
 
             // Notify Interviewer
@@ -587,7 +588,8 @@ public class InterviewService {
                     "Interview Completed",
                     "The interview \"" + savedInterview.getTitle() + "\" has been completed.",
                     savedInterview.getId(),
-                    savedInterview.getRoomId()
+                    savedInterview.getRoomId(),
+                    savedInterview.getTitle()
             );
 
             // Evaluation Pending notification for Interviewer
@@ -598,7 +600,21 @@ public class InterviewService {
                         "Evaluation Pending",
                         "You have an interview evaluation waiting for your review.",
                         savedInterview.getId(),
-                        savedInterview.getRoomId()
+                        savedInterview.getRoomId(),
+                        savedInterview.getTitle()
+                );
+            }
+
+            // Evaluation Pending notification for Candidate
+            if (savedInterview.getInterviewerScore() == null && savedInterview.getCandidateId() != null) {
+                notificationService.createAndSendNotification(
+                        savedInterview.getCandidateId(),
+                        NotificationType.EVALUATION_PENDING,
+                        "Evaluation Pending",
+                        "You have an interview review waiting for your feedback.",
+                        savedInterview.getId(),
+                        savedInterview.getRoomId(),
+                        savedInterview.getTitle()
                 );
             }
         }
@@ -723,6 +739,9 @@ public class InterviewService {
 
         // Send notification to the score recipient
         if (notificationService != null) {
+            // Resolve pending evaluation notification for the scorer
+            notificationService.resolvePendingEvaluation(scorerUserId, interview.getId(), interview.getRoomId());
+
             if (isInterviewer) {
                 notificationService.createAndSendNotification(
                         recipientUserId,
@@ -730,7 +749,8 @@ public class InterviewService {
                         "Interview Score Received",
                         "Your interviewer submitted your interview score.",
                         interview.getId(),
-                        interview.getRoomId()
+                        interview.getRoomId(),
+                        interview.getTitle()
                 );
             } else {
                 notificationService.createAndSendNotification(
@@ -739,7 +759,8 @@ public class InterviewService {
                         "Candidate Review Received",
                         currentUser.getName() + " submitted their interview review.",
                         interview.getId(),
-                        interview.getRoomId()
+                        interview.getRoomId(),
+                        interview.getTitle()
                 );
             }
         }

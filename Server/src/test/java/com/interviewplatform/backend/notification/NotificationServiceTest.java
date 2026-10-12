@@ -73,7 +73,9 @@ class NotificationServiceTest {
         notificationService = new NotificationService(
                 notificationRepository,
                 messagingTemplate,
-                userService
+                userService,
+                interviewRepository,
+                interviewScoreRepository
         );
 
         interviewService = new InterviewService(
@@ -382,8 +384,260 @@ class NotificationServiceTest {
                 n.getRecipientUserId().equals("interviewer-1") &&
                         n.getType() == NotificationType.EVALUATION_PENDING);
 
+        boolean candidateEvalPendingSent = captured.stream().anyMatch(n ->
+                n.getRecipientUserId().equals("candidate-1") &&
+                        n.getType() == NotificationType.EVALUATION_PENDING);
+
         assertTrue(candidateReceivedCompleted, "Candidate should receive INTERVIEW_COMPLETED");
         assertTrue(interviewerReceivedCompleted, "Interviewer should receive INTERVIEW_COMPLETED");
         assertTrue(evaluationPendingSent, "Interviewer should receive EVALUATION_PENDING");
+        assertTrue(candidateEvalPendingSent, "Candidate should also receive EVALUATION_PENDING");
+    }
+
+    // 11. delete individual notification successfully
+    @Test
+    void testDeleteNotification_Success() {
+        when(userService.getLoggedInUser()).thenReturn(candidate);
+        Notification notif = new Notification("candidate-1", NotificationType.INTERVIEW_SCHEDULED, "Title", "Msg", "id-1", "ROOM-1");
+        notif.setId("notif-to-delete");
+
+        when(notificationRepository.findByIdAndRecipientUserId("notif-to-delete", "candidate-1"))
+                .thenReturn(Optional.of(notif));
+
+        notificationService.deleteNotification("notif-to-delete");
+
+        verify(notificationRepository).delete(notif);
+    }
+
+    // 12. user cannot delete another user's notification (throws 404)
+    @Test
+    void testDeleteNotification_NotFoundOrOtherUser_Throws404() {
+        when(userService.getLoggedInUser()).thenReturn(candidate);
+        when(notificationRepository.findByIdAndRecipientUserId("notif-other", "candidate-1"))
+                .thenReturn(Optional.empty());
+
+        ApiException ex = assertThrows(ApiException.class, () ->
+                notificationService.deleteNotification("notif-other")
+        );
+        assertEquals(HttpStatus.NOT_FOUND, ex.getStatus());
+        verify(notificationRepository, never()).delete(any());
+    }
+
+    // 13. delete notification unauthenticated throws 401
+    @Test
+    void testDeleteNotification_Unauthorized_Throws401() {
+        when(userService.getLoggedInUser()).thenReturn(null);
+
+        ApiException ex = assertThrows(ApiException.class, () ->
+                notificationService.deleteNotification("notif-1")
+        );
+        assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatus());
+        verify(notificationRepository, never()).delete(any());
+    }
+
+    // 14. clear all notifications for current user
+    @Test
+    void testClearAllNotifications_Success() {
+        when(userService.getLoggedInUser()).thenReturn(candidate);
+        Notification n1 = new Notification("candidate-1", NotificationType.INTERVIEW_SCHEDULED, "T1", "M1", "id-1", "ROOM-1");
+        Notification n2 = new Notification("candidate-1", NotificationType.INTERVIEW_COMPLETED, "T2", "M2", "id-2", "ROOM-2");
+
+        when(notificationRepository.findByRecipientUserIdOrderByCreatedAtDesc("candidate-1"))
+                .thenReturn(List.of(n1, n2));
+
+        notificationService.clearAllNotifications();
+
+        verify(notificationRepository).deleteAll(List.of(n1, n2));
+    }
+
+    // 15. resolve pending evaluation deletes matching notification
+    @Test
+    void testResolvePendingEvaluation() {
+        Notification pending = new Notification("interviewer-1", NotificationType.EVALUATION_PENDING, "Eval", "Msg", "int-1", "ROOM-1");
+        pending.setId("notif-pending-1");
+        Notification other = new Notification("interviewer-1", NotificationType.INTERVIEW_COMPLETED, "Done", "Msg", "int-1", "ROOM-1");
+        other.setId("notif-completed-1");
+
+        when(notificationRepository.findByRecipientUserIdOrderByCreatedAtDesc("interviewer-1"))
+                .thenReturn(List.of(pending, other));
+
+        notificationService.resolvePendingEvaluation("interviewer-1", "int-1", "ROOM-1");
+
+        verify(notificationRepository).delete(pending);
+        verify(notificationRepository, never()).delete(other);
+    }
+
+    // 16. submitting score resolves pending evaluation notification
+    @Test
+    void testSubmitScore_ResolvesPendingEvaluation() {
+        when(userService.getLoggedInUser()).thenReturn(interviewer);
+
+        Interview interview = new Interview();
+        interview.setId("int-score-res");
+        interview.setRoomId("ROOM-RES-1");
+        interview.setInterviewerId("interviewer-1");
+        interview.setCandidateId("candidate-1");
+        interview.setStatus("COMPLETED");
+
+        when(interviewRepository.findByRoomId("ROOM-RES-1")).thenReturn(Optional.of(interview));
+        when(interviewScoreRepository.existsByInterviewIdAndScorerUserId(anyString(), anyString())).thenReturn(false);
+        when(interviewScoreRepository.existsByRoomIdAndScorerUserId(anyString(), anyString())).thenReturn(false);
+        when(interviewScoreRepository.save(any(InterviewScore.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        Notification pendingNotif = new Notification("interviewer-1", NotificationType.EVALUATION_PENDING, "Pending", "Msg", "int-score-res", "ROOM-RES-1");
+        when(notificationRepository.findByRecipientUserIdOrderByCreatedAtDesc("interviewer-1"))
+                .thenReturn(List.of(pendingNotif));
+
+        interviewService.submitScore("ROOM-RES-1", 95);
+
+        // Verification that resolvePendingEvaluation was invoked and deleted the pending evaluation
+        verify(notificationRepository).delete(pendingNotif);
+    }
+
+    // 17. sync creates evaluation pending notification for completed unscored interview
+    @Test
+    void testSyncPendingReviewNotifications_CreatesEvaluationPendingForCompletedUnscored() {
+        when(userService.getLoggedInUser()).thenReturn(interviewer);
+
+        Interview completedInterview = new Interview();
+        completedInterview.setId("int-completed-unscored");
+        completedInterview.setRoomId("ROOM-UNSCORED");
+        completedInterview.setInterviewerId("interviewer-1");
+        completedInterview.setCandidateId("candidate-1");
+        completedInterview.setStatus("COMPLETED");
+        completedInterview.setCandidateScore(null);
+
+        when(interviewRepository.findByInterviewerIdAndStatusOrderByCreatedAtDesc("interviewer-1", "COMPLETED"))
+                .thenReturn(List.of(completedInterview));
+        when(interviewRepository.findByCandidateIdAndStatusOrderByCreatedAtDesc("interviewer-1", "COMPLETED"))
+                .thenReturn(Collections.emptyList());
+
+        when(notificationRepository.existsByRecipientUserIdAndTypeAndRoomId(
+                "interviewer-1",
+                NotificationType.EVALUATION_PENDING,
+                "ROOM-UNSCORED"
+        )).thenReturn(false);
+        when(notificationRepository.existsByRecipientUserIdAndTypeAndRelatedInterviewId(
+                "interviewer-1",
+                NotificationType.EVALUATION_PENDING,
+                "int-completed-unscored"
+        )).thenReturn(false);
+
+        when(notificationRepository.findByRecipientUserIdOrderByCreatedAtDesc("interviewer-1"))
+                .thenReturn(Collections.emptyList());
+
+        notificationService.getNotificationsForCurrentUser();
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(captor.capture());
+
+        Notification saved = captor.getValue();
+        assertEquals("interviewer-1", saved.getRecipientUserId());
+        assertEquals(NotificationType.EVALUATION_PENDING, saved.getType());
+        assertEquals("int-completed-unscored", saved.getRelatedInterviewId());
+        assertEquals("ROOM-UNSCORED", saved.getRoomId());
+    }
+
+    // 18. sync does not create duplicate evaluation pending notification if already exists
+    @Test
+    void testSyncPendingReviewNotifications_DoesNotCreateDuplicateIfExists() {
+        when(userService.getLoggedInUser()).thenReturn(interviewer);
+
+        Interview completedInterview = new Interview();
+        completedInterview.setId("int-completed-dup");
+        completedInterview.setRoomId("ROOM-DUP");
+        completedInterview.setInterviewerId("interviewer-1");
+        completedInterview.setStatus("COMPLETED");
+        completedInterview.setCandidateScore(null);
+
+        when(interviewRepository.findByInterviewerIdAndStatusOrderByCreatedAtDesc("interviewer-1", "COMPLETED"))
+                .thenReturn(List.of(completedInterview));
+        when(interviewRepository.findByCandidateIdAndStatusOrderByCreatedAtDesc("interviewer-1", "COMPLETED"))
+                .thenReturn(Collections.emptyList());
+
+        // Already exists in DB
+        when(notificationRepository.existsByRecipientUserIdAndTypeAndRoomId(
+                "interviewer-1",
+                NotificationType.EVALUATION_PENDING,
+                "ROOM-DUP"
+        )).thenReturn(true);
+
+        when(notificationRepository.findByRecipientUserIdOrderByCreatedAtDesc("interviewer-1"))
+                .thenReturn(Collections.emptyList());
+
+        notificationService.getNotificationsForCurrentUser();
+
+        // No new save because it already exists
+        verify(notificationRepository, never()).save(any());
+    }
+
+    // 19. sync resolves pending evaluation if interview is already scored
+    @Test
+    void testSyncPendingReviewNotifications_ResolvesIfAlreadyScored() {
+        when(userService.getLoggedInUser()).thenReturn(interviewer);
+
+        Interview scoredInterview = new Interview();
+        scoredInterview.setId("int-scored");
+        scoredInterview.setRoomId("ROOM-SCORED");
+        scoredInterview.setInterviewerId("interviewer-1");
+        scoredInterview.setStatus("COMPLETED");
+        scoredInterview.setCandidateScore(88); // Already scored
+
+        when(interviewRepository.findByInterviewerIdAndStatusOrderByCreatedAtDesc("interviewer-1", "COMPLETED"))
+                .thenReturn(List.of(scoredInterview));
+        when(interviewRepository.findByCandidateIdAndStatusOrderByCreatedAtDesc("interviewer-1", "COMPLETED"))
+                .thenReturn(Collections.emptyList());
+
+        Notification oldPending = new Notification("interviewer-1", NotificationType.EVALUATION_PENDING, "Eval", "Msg", "int-scored", "ROOM-SCORED");
+        when(notificationRepository.findByRecipientUserIdOrderByCreatedAtDesc("interviewer-1"))
+                .thenReturn(List.of(oldPending));
+
+        notificationService.getNotificationsForCurrentUser();
+
+        verify(notificationRepository).delete(oldPending);
+        verify(notificationRepository, never()).save(any());
+    }
+
+    // 20. Notification creation and backfill preserves and populates interviewTitle
+    @Test
+    void testNotificationInterviewTitlePopulationAndBackfill() {
+        Interview interview = new Interview();
+        interview.setId("int-title-1");
+        interview.setRoomId("ROOM-TITLE-1");
+        interview.setTitle("Java Developer Interview");
+
+        when(interviewRepository.findById("int-title-1")).thenReturn(Optional.of(interview));
+        when(notificationRepository.save(any(Notification.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // When creating notification without title explicitly passed, it looks up from repository
+        Notification created = notificationService.createAndSendNotification(
+                "candidate-1",
+                NotificationType.EVALUATION_PENDING,
+                "Evaluation Pending",
+                "Review needed",
+                "int-title-1",
+                "ROOM-TITLE-1"
+        );
+
+        assertNotNull(created);
+        assertEquals("Java Developer Interview", created.getInterviewTitle());
+
+        // When backfilling notifications in getNotificationsForCurrentUser
+        when(userService.getLoggedInUser()).thenReturn(candidate);
+        Notification legacyNotif = new Notification(
+                "candidate-1",
+                NotificationType.EVALUATION_PENDING,
+                "Evaluation Pending",
+                "Review needed",
+                "int-title-1",
+                "ROOM-TITLE-1",
+                null
+        );
+        when(notificationRepository.findByRecipientUserIdOrderByCreatedAtDesc("candidate-1"))
+                .thenReturn(List.of(legacyNotif));
+
+        List<Notification> fetched = notificationService.getNotificationsForCurrentUser();
+        assertEquals(1, fetched.size());
+        assertEquals("Java Developer Interview", fetched.get(0).getInterviewTitle());
     }
 }

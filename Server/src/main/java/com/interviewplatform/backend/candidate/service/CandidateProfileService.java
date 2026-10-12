@@ -84,10 +84,15 @@ public class CandidateProfileService {
 
         User user = userService.getLoggedInUser();
 
-        if (!user.getTargets().remove(target)) {
-            throw new RuntimeException("Target not found.");
+        if (target != null) {
+            String trimmed = target.trim();
+            boolean removed = user.getTargets().removeIf(t -> t != null && t.trim().equalsIgnoreCase(trimmed));
+            if (removed) {
+                userService.saveUser(user);
+                return;
+            }
         }
 
-        userService.saveUser(user);
+        throw new RuntimeException("Target not found.");
     }
 }

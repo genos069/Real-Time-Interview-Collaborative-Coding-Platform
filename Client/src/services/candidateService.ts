@@ -2,6 +2,7 @@ import API from "./api";
 import type {
   DashboardResponse,
   UserProfile,
+  Experience,
 } from "../app/pages/CandidateDashboard";
 
 export const fetchDashboard = async (): Promise<DashboardResponse> => {
@@ -18,6 +19,7 @@ export const fetchDashboard = async (): Promise<DashboardResponse> => {
       email: data.user?.email ?? "",
       title: data.user?.title ?? "",
       location: data.user?.location ?? "",
+      avatar: data.user?.avatar ?? null,
       about: data.user?.about ?? "",
       readinessScore: data.user?.readinessScore ?? 0,
     },
@@ -81,9 +83,29 @@ export const fetchDashboard = async (): Promise<DashboardResponse> => {
 };
 
 export const updateProfile = async (
-  payload: Partial<UserProfile>,
+  payload: Partial<UserProfile> & {
+    skills?: string[];
+    targets?: string[];
+    experience?: Experience[];
+  },
 ): Promise<UserProfile> => {
   const { data } = await API.put("/candidate/profile", payload);
+  return data;
+};
+
+export const uploadAvatarApi = async (file: File): Promise<UserProfile> => {
+  const formData = new FormData();
+  formData.append("file", file);
+  const { data } = await API.post("/user/avatar", formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+  });
+  return data;
+};
+
+export const removeAvatarApi = async (): Promise<UserProfile> => {
+  const { data } = await API.delete("/user/avatar");
   return data;
 };
 

@@ -63,6 +63,11 @@ public class SecurityConfig {
                                 "/api/auth/test")
                         .permitAll()
 
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/user/avatar/**")
+                        .permitAll()
+
                         // AI MOCK APIs
                         .requestMatchers("/api/interview/**")
                         .authenticated()

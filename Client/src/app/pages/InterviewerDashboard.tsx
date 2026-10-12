@@ -3,7 +3,7 @@ import {
   Clock, Users, Calendar,
   TrendingUp, Edit3, Eye, Trash2, Copy,
   Mail, MapPin, Briefcase, X, Save,
-  Loader2, AlertCircle, CheckCircle2,
+  Loader2, AlertCircle, CheckCircle2, Camera,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -11,7 +11,7 @@ import {
 } from "recharts";
 import { DashboardLayout } from "../components/DashboardLayout";
 import { Link, useNavigate } from "react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   getCurrentInterviewRooms,
   startInterviewRoom,
@@ -26,9 +26,12 @@ import {
   getInterviewerDashboard,
   getInterviewerProfile,
   updateInterviewerProfile,
+  uploadInterviewerAvatarApi,
+  removeInterviewerAvatarApi,
   type InterviewerDashboardData,
   type InterviewerProfile,
 } from "../../services/interviewerService";
+import { getAvatarUrl } from "../../utils/avatarUtils";
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard className="w-4 h-4" /> },
@@ -45,13 +48,9 @@ const rooms = [
   { id: "R-2903", title: "Product Engineer — Behavioral", candidate: "Ananya Gupta", role: "Product Engineer", date: "Jun 10, 2026 · 1:00 PM", status: "completed", duration: "35 min", score: 90 },
 ];
 
-function getShortLabel(name?: string): string {
-  if (!name || !name.trim()) return "Candidate";
-  const parts = name.trim().split(/\s+/);
-  if (parts.length > 1) {
-    return `${parts[0]} ${parts[parts.length - 1][0]}.`;
-  }
-  return name.length > 12 ? `${name.substring(0, 10)}...` : name;
+function getInterviewTitleLabel(title?: string): string {
+  const clean = title?.trim() || "Untitled Interview";
+  return clean.length > 18 ? `${clean.substring(0, 16)}…` : clean;
 }
 
 function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
@@ -145,13 +144,17 @@ function DashboardSection() {
   const mutualScoreData = chronologicalReviews.map((c) => {
     const recScore = (c.roomId ? receivedScoreMap.get(c.roomId) : undefined)
       ?? (c.interviewId ? receivedScoreMap.get(c.interviewId) : undefined);
+    const rawTitle = c.interviewTitle?.trim();
+    const interviewTitle = rawTitle || "Untitled Interview";
     return {
-      name: getShortLabel(c.candidateName || c.candidateEmail),
-      fullName: c.candidateName || c.candidateEmail || "Candidate",
+      name: getInterviewTitleLabel(interviewTitle),
+      title: interviewTitle,
+      candidateName: c.candidateName || c.candidateEmail || "Candidate",
       candidateScore: c.score != null ? c.score : 0,
       interviewerScore: recScore != null ? recScore : 0,
       hasInterviewerScore: recScore != null,
-      role: c.targetRole || c.interviewTitle || "Interview",
+      role: c.targetRole || "Interview",
+      interviewId: c.interviewId || c.roomId || "",
     };
   });
 
@@ -160,13 +163,20 @@ function DashboardSection() {
   const averageScoreData = chronologicalReviews.map((c, idx) => {
     cumulativeSum += c.score != null ? c.score : 0;
     const runningAvg = Math.round((cumulativeSum / (idx + 1)) * 10) / 10;
+    const rawTitle = c.interviewTitle?.trim();
+    const interviewTitle = rawTitle || "Untitled Interview";
     return {
-      name: getShortLabel(c.candidateName || c.candidateEmail),
-      fullName: c.candidateName || c.candidateEmail || "Candidate",
+      name: getInterviewTitleLabel(interviewTitle),
+      title: interviewTitle,
+      candidateName: c.candidateName || c.candidateEmail || "Candidate",
       score: c.score != null ? c.score : 0,
       average: runningAvg,
+      interviewId: c.interviewId || c.roomId || "",
     };
   });
+
+  const chartContainerCls =
+    "w-full h-[200px] outline-none focus:outline-none focus-visible:outline-none [&_.recharts-wrapper]:outline-none [&_.recharts-wrapper:focus]:outline-none [&_.recharts-wrapper:focus-visible]:outline-none [&_.recharts-surface]:outline-none [&_.recharts-surface:focus]:outline-none [&_.recharts-surface:focus-visible]:outline-none [&_svg]:outline-none [&_svg:focus]:outline-none [&_svg:focus-visible]:outline-none [&_*]:focus:outline-none [&_*]:focus-visible:outline-none";
 
   return (
     <div>
@@ -213,28 +223,32 @@ function DashboardSection() {
               No mutual interview scores recorded yet. Scores given by you and candidates will appear here.
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={mutualScoreData} barGap={6}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8" vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
-                <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  formatter={(value: any, name: any, item: any) => {
-                    if (name === "Interviewer Score" && !item?.payload?.hasInterviewerScore) {
-                      return ["Not submitted yet", name];
-                    }
-                    return [`${value}/100`, name];
-                  }}
-                  labelFormatter={(_label, payload) => {
-                    const item = payload?.[0]?.payload;
-                    return item?.fullName ? `${item.fullName} · ${item.role}` : _label;
-                  }}
-                  contentStyle={{ borderRadius: 10, border: "1px solid #dde6ef", fontSize: 12 }}
-                />
-                <Bar dataKey="candidateScore" fill="#0d1b2a" radius={[4, 4, 0, 0]} name="Candidate Score" />
-                <Bar dataKey="interviewerScore" fill="#4d9de0" radius={[4, 4, 0, 0]} name="Interviewer Score" />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className={chartContainerCls}>
+              <ResponsiveContainer width="100%" height={200} style={{ outline: "none" }}>
+                <BarChart data={mutualScoreData} barGap={6} style={{ outline: "none" }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    formatter={(value: any, name: any, item: any) => {
+                      if (name === "Interviewer Score" && !item?.payload?.hasInterviewerScore) {
+                        return ["Not submitted yet", name];
+                      }
+                      return [`${value}/100`, name];
+                    }}
+                    labelFormatter={(_label, payload) => {
+                      const item = payload?.[0]?.payload;
+                      if (!item) return _label;
+                      const title = item.title || _label;
+                      return item.candidateName ? `${title} · ${item.candidateName}` : title;
+                    }}
+                    contentStyle={{ borderRadius: 10, border: "1px solid #dde6ef", fontSize: 12 }}
+                  />
+                  <Bar dataKey="candidateScore" fill="#0d1b2a" radius={[4, 4, 0, 0]} name="Candidate Score" />
+                  <Bar dataKey="interviewerScore" fill="#4d9de0" radius={[4, 4, 0, 0]} name="Interviewer Score" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           )}
         </div>
         <div className="lg:col-span-2 bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
@@ -251,36 +265,40 @@ function DashboardSection() {
               No completed interview scores recorded yet. Your average scoring trend will appear here once candidates are evaluated.
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={averageScoreData}>
-                <defs>
-                  <linearGradient id="intv-score-grad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#4d9de0" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#4d9de0" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8" />
-                <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
-                <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  formatter={(value: any, name: any) => [`${value}/100`, name]}
-                  labelFormatter={(_label, payload) => {
-                    const item = payload?.[0]?.payload;
-                    return item?.fullName || _label;
-                  }}
-                  contentStyle={{ borderRadius: 10, border: "1px solid #dde6ef", fontSize: 12 }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="average"
-                  stroke="#4d9de0"
-                  strokeWidth={2.5}
-                  fill="url(#intv-score-grad)"
-                  dot={{ r: 3, fill: "#4d9de0" }}
-                  name="Avg Score"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            <div className={chartContainerCls}>
+              <ResponsiveContainer width="100%" height={200} style={{ outline: "none" }}>
+                <AreaChart data={averageScoreData} style={{ outline: "none" }}>
+                  <defs>
+                    <linearGradient id="intv-score-grad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#4d9de0" stopOpacity={0.15} />
+                      <stop offset="95%" stopColor="#4d9de0" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8" />
+                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#4a6080" }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    formatter={(value: any, name: any) => [`${value}/100`, name]}
+                    labelFormatter={(_label, payload) => {
+                      const item = payload?.[0]?.payload;
+                      if (!item) return _label;
+                      const title = item.title || _label;
+                      return item.candidateName ? `${title} · ${item.candidateName}` : title;
+                    }}
+                    contentStyle={{ borderRadius: 10, border: "1px solid #dde6ef", fontSize: 12 }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="average"
+                    stroke="#4d9de0"
+                    strokeWidth={2.5}
+                    fill="url(#intv-score-grad)"
+                    dot={{ r: 3, fill: "#4d9de0" }}
+                    name="Avg Score"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           )}
         </div>
       </div>
@@ -851,7 +869,7 @@ function ProfileSection({ user, dashboardData, onEdit }: ProfileSectionProps) {
           <div className="relative mb-4">
             {user?.avatar ? (
               <img
-                src={user.avatar}
+                src={getAvatarUrl(user.avatar)}
                 alt={displayName}
                 className="w-20 h-20 rounded-full object-cover"
               />
@@ -958,6 +976,13 @@ interface EditProfileSectionProps {
 }
 
 function EditProfileSection({ user, onBack, onProfileSaved }: EditProfileSectionProps) {
+  const [avatar, setAvatar] = useState<string | null>(user?.avatar ?? null);
+  const [previewAvatar, setPreviewAvatar] = useState<string | null>(null);
+  const [avatarLoading, setAvatarLoading] = useState(false);
+  const [avatarError, setAvatarError] = useState("");
+  const [avatarSuccess, setAvatarSuccess] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [form, setForm] = useState({
     name: user?.name ?? "",
     email: user?.email ?? "",
@@ -979,6 +1004,88 @@ function EditProfileSection({ user, onBack, onProfileSaved }: EditProfileSection
     .slice(0, 2)
     .toUpperCase() || "IN";
 
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+
+    setAvatarError("");
+    setAvatarSuccess("");
+
+    if (file.size > 4 * 1024 * 1024) {
+      setAvatarError("Image file size must be less than 4 MB.");
+      return;
+    }
+
+    const validMimes = ["image/jpeg", "image/png", "image/gif"];
+    if (!validMimes.includes(file.type)) {
+      setAvatarError("Only JPG, PNG, and GIF images are allowed.");
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setPreviewAvatar(previewUrl);
+
+    setAvatarLoading(true);
+    try {
+      const updated = await uploadInterviewerAvatarApi(file);
+      const newAvatarUrl = updated.avatar ?? null;
+      setAvatar(newAvatarUrl);
+      setPreviewAvatar(null);
+      setAvatarSuccess("Profile photo updated successfully!");
+      if (user) {
+        onProfileSaved({ ...user, avatar: newAvatarUrl });
+      }
+      try {
+        const stored = JSON.parse(localStorage.getItem("user") || "{}");
+        localStorage.setItem(
+          "user",
+          JSON.stringify({ ...stored, avatar: newAvatarUrl })
+        );
+      } catch {}
+    } catch (err: any) {
+      setPreviewAvatar(null);
+      const msg =
+        err?.response?.data?.message ||
+        err?.message ||
+        "Failed to upload profile photo.";
+      setAvatarError(msg);
+    } finally {
+      setAvatarLoading(false);
+    }
+  }
+
+  async function handleRemovePhoto() {
+    if (!avatar && !previewAvatar) return;
+    setAvatarLoading(true);
+    setAvatarError("");
+    setAvatarSuccess("");
+    try {
+      await removeInterviewerAvatarApi();
+      setAvatar(null);
+      setPreviewAvatar(null);
+      setAvatarSuccess("Profile photo removed.");
+      if (user) {
+        onProfileSaved({ ...user, avatar: null });
+      }
+      try {
+        const stored = JSON.parse(localStorage.getItem("user") || "{}");
+        localStorage.setItem(
+          "user",
+          JSON.stringify({ ...stored, avatar: null })
+        );
+      } catch {}
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.message ||
+        err?.message ||
+        "Failed to remove profile photo.";
+      setAvatarError(msg);
+    } finally {
+      setAvatarLoading(false);
+    }
+  }
+
   async function handleSave() {
     if (!form.name.trim()) {
       setSaveError("Full name cannot be empty.");
@@ -994,13 +1101,14 @@ function EditProfileSection({ user, onBack, onProfileSaved }: EditProfileSection
         location: form.location.trim(),
         about: form.about.trim(),
       });
-      onProfileSaved(updated);
+      onProfileSaved({ ...updated, avatar: avatar ?? updated.avatar });
       try {
         const stored = JSON.parse(localStorage.getItem("user") || "{}");
         localStorage.setItem("user", JSON.stringify({
           ...stored,
           name: updated.name,
           email: updated.email,
+          avatar: avatar ?? updated.avatar ?? null,
         }));
       } catch {
         // ignore storage parse error
@@ -1036,16 +1144,77 @@ function EditProfileSection({ user, onBack, onProfileSaved }: EditProfileSection
         {/* Avatar */}
         <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-7 flex flex-col items-center text-center h-fit">
           <div className="relative mb-5">
-            {user?.avatar ? (
-              <img src={user.avatar} alt={displayName} className="w-24 h-24 rounded-full object-cover" />
+            {previewAvatar || avatar ? (
+              <img
+                src={getAvatarUrl(previewAvatar || avatar)}
+                alt={displayName}
+                className="w-24 h-24 rounded-full object-cover"
+                onError={() => {
+                  setPreviewAvatar(null);
+                  setAvatar(null);
+                }}
+              />
             ) : (
               <div className="w-24 h-24 rounded-full bg-[#1a4a7a] flex items-center justify-center text-white text-3xl" style={{ fontFamily: "'Roboto Slab', serif", fontWeight: 700 }}>
                 {initials}
               </div>
             )}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={avatarLoading}
+              title="Change Photo"
+              className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-[#0d1b2a] flex items-center justify-center shadow-lg hover:bg-[#1a2f45] transition-colors disabled:opacity-50"
+            >
+              <Camera className="w-3.5 h-3.5 text-white" />
+            </button>
           </div>
           <p className="text-[#0d1b2a] text-sm mb-1" style={{ fontWeight: 600 }}>{displayName}</p>
-          <p className="text-[#4a6080] text-xs">Technical Interviewer</p>
+          <p className="text-[#4a6080] text-xs mb-3">Technical Interviewer</p>
+          <p className="text-[#4a6080] text-xs mb-4">JPG, PNG or GIF · Max 4MB</p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/gif"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={avatarLoading}
+            className="w-full flex items-center justify-center gap-2 border border-[#0d1b2a]/15 text-[#0d1b2a] text-sm py-2 rounded-xl hover:bg-[#f0f4f8] transition-colors disabled:opacity-50"
+            style={{ fontWeight: 500 }}
+          >
+            {avatarLoading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Processing...</span>
+              </>
+            ) : (
+              "Upload Photo"
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={handleRemovePhoto}
+            disabled={avatarLoading || (!avatar && !previewAvatar)}
+            className="mt-2 w-full text-rose-500 text-sm py-2 rounded-xl hover:bg-rose-50 transition-colors disabled:opacity-40"
+            style={{ fontWeight: 500 }}
+          >
+            Remove Photo
+          </button>
+
+          {avatarSuccess && (
+            <div className="mt-3 text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg w-full">
+              {avatarSuccess}
+            </div>
+          )}
+          {avatarError && (
+            <div className="mt-3 text-xs text-rose-600 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-lg w-full">
+              {avatarError}
+            </div>
+          )}
         </div>
 
         {/* Form */}
@@ -1135,6 +1304,7 @@ export default function InterviewerDashboard() {
           title: "",
           location: "",
           about: "",
+          avatar: u.avatar || "",
         };
       }
     } catch {
@@ -1237,6 +1407,7 @@ export default function InterviewerDashboard() {
       }}
       userName={displayName}
       userInitials={userInitials}
+      userAvatar={profile?.avatar}
     >
       <div className="flex items-center justify-between mb-8">
         <div>
