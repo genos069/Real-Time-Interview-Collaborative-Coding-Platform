@@ -92,6 +92,12 @@ public class InterviewerDashboardService {
             if (interview == null && score.getInterviewId() != null) {
                 interview = interviewById.get(score.getInterviewId());
             }
+            if (interview == null && score.getRoomId() != null && !score.getRoomId().trim().isEmpty()) {
+                interview = interviewRepository.findByRoomId(score.getRoomId()).orElse(null);
+            }
+            if (interview == null && score.getInterviewId() != null && !score.getInterviewId().trim().isEmpty()) {
+                interview = interviewRepository.findById(score.getInterviewId()).orElse(null);
+            }
 
             Optional<User> candidateOpt = score.getRecipientUserId() != null
                     ? userRepository.findById(score.getRecipientUserId())
@@ -124,7 +130,10 @@ public class InterviewerDashboardService {
                     ? interview.getTargetRole()
                     : candidateTitle;
 
-            String interviewTitle = interview != null ? interview.getTitle() : "Technical Interview";
+            String interviewTitle = "Untitled Interview";
+            if (interview != null && interview.getTitle() != null && !interview.getTitle().trim().isEmpty()) {
+                interviewTitle = interview.getTitle().trim();
+            }
             String roomId = score.getRoomId() != null ? score.getRoomId() : (interview != null ? interview.getRoomId() : "");
 
             int scoreVal = score.getScore() != null ? score.getScore() : 0;

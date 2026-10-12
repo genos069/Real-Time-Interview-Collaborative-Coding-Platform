@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router";
 import { motion } from "framer-motion";
 import {
@@ -16,7 +16,6 @@ import {
   Star,
   Code2,
   MessageSquare,
-  Users,
   Calendar,
   BarChart2,
   Edit3,
@@ -52,17 +51,61 @@ import { DashboardLayout } from "../components/DashboardLayout";
 import {
   fetchDashboard,
   updateProfile,
-  addSkillApi,
-  deleteSkillApi,
-  addTargetApi,
-  deleteTargetApi,
+  uploadAvatarApi,
+  removeAvatarApi,
 } from "../../services/candidateService";
+import { getAvatarUrl } from "../../utils/avatarUtils";
 import { getHistory, getInterviewById } from "../../services/history";
 import {
   getCurrentInterviewRooms,
   joinInterviewRoom,
   type InterviewRoomRecord,
 } from "../../services/interviewRoomService";
+
+// Experience
+
+export interface Experience {
+  id?: string;
+  title?: string;
+  role?: string;
+  company: string;
+  startDate?: string;
+  endDate?: string | null;
+  current?: boolean;
+  description?: string | null;
+  period?: string;
+}
+
+export function formatMonthYear(dateStr?: string | null): string {
+  if (!dateStr) return "";
+  if (/^\d{4}-\d{2}$/.test(dateStr)) {
+    const [year, month] = dateStr.split("-");
+    const monthNames = [
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    ];
+    const mIdx = parseInt(month, 10) - 1;
+    if (mIdx >= 0 && mIdx < 12) {
+      return `${monthNames[mIdx]} ${year}`;
+    }
+  }
+  return dateStr;
+}
+
+export function getExperiencePeriodText(exp: Experience): string {
+  if (exp.period && !exp.startDate && !exp.endDate) {
+    return exp.period;
+  }
+  const start = formatMonthYear(exp.startDate) || exp.startDate || "";
+  if (exp.current) {
+    return start ? `${start} – Present` : "Present";
+  }
+  const end = formatMonthYear(exp.endDate) || exp.endDate || "";
+  if (start && end) {
+    return `${start} – ${end}`;
+  }
+  return start || end || exp.period || "";
+}
 
 // User
 
@@ -75,6 +118,9 @@ export interface UserProfile {
   avatar: string | null;
   about: string | null;
   readinessScore?: number;
+  skills?: string[];
+  targets?: string[];
+  experience?: Experience[];
 }
 
 export function computeAverageMockScore(
@@ -188,14 +234,6 @@ export interface Room {
   date: string;
   status: "upcoming" | "completed";
   duration: string;
-}
-
-// Experience
-
-export interface Experience {
-  role: string;
-  company: string;
-  period: string;
 }
 
 // Dashboard Response
@@ -1354,7 +1392,7 @@ function ProfileSection({
           <div className="relative mb-4">
             {user.avatar ? (
               <img
-                src={user.avatar}
+                src={getAvatarUrl(user.avatar)}
                 alt={user.name}
                 className="w-20 h-20 rounded-full object-cover"
               />
@@ -1468,26 +1506,55 @@ function ProfileSection({
             {experience.length === 0 ? (
               <p className="text-[#4a6080] text-xs">No experience added yet.</p>
             ) : (
-              <div className="space-y-3">
-                {experience.map(({ role, company, period }) => (
-                  <div
-                    key={`${role}-${company}`}
-                    className="flex items-center gap-3"
-                  >
-                    <div className="w-8 h-8 rounded-lg bg-[#0d1b2a]/6 flex items-center justify-center">
-                      <Users className="w-3.5 h-3.5 text-[#4a6080]" />
+              <div className="space-y-4">
+                {experience.map((exp, idx) => {
+                  const jobTitle = exp.title || exp.role || "Role";
+                  const companyName = exp.company || "";
+                  const periodText = getExperiencePeriodText(exp);
+                  return (
+                    <div
+                      key={exp.id || `${jobTitle}-${companyName}-${idx}`}
+                      className="flex items-start gap-3.5"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-[#0d1b2a]/6 flex items-center justify-center shrink-0 mt-0.5">
+                        <Briefcase className="w-4 h-4 text-[#4a6080]" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p
+                            className="text-[#0d1b2a] text-sm"
+                            style={{ fontWeight: 600 }}
+                          >
+                            {jobTitle}
+                          </p>
+                          {companyName && (
+                            <>
+                              <span className="text-[#4a6080] text-sm">·</span>
+                              <p className="text-[#4a6080] text-sm font-medium">
+                                {companyName}
+                              </p>
+                            </>
+                          )}
+                          {exp.current && (
+                            <span className="text-[10px] bg-[#00bfa6]/15 text-[#00bfa6] font-semibold px-2 py-0.5 rounded-full">
+                              Current
+                            </span>
+                          )}
+                        </div>
+                        {periodText && (
+                          <p className="text-[#4a6080] text-xs mt-0.5">
+                            {periodText}
+                          </p>
+                        )}
+                        {exp.description && (
+                          <p className="text-[#4a6080] text-xs mt-1.5 leading-relaxed whitespace-pre-line">
+                            {exp.description}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                    <div>
-                      <p
-                        className="text-[#0d1b2a] text-sm"
-                        style={{ fontWeight: 500 }}
-                      >
-                        {role} · {company}
-                      </p>
-                      <p className="text-[#4a6080] text-xs">{period}</p>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1508,14 +1575,44 @@ function EditProfileSection({
     user: UserProfile,
     skills: string[],
     targets: string[],
+    experience: Experience[],
   ) => void;
 }) {
   const { user } = data;
 
   const [skills, setSkills] = useState<string[]>(data.skills ?? []);
   const [targets, setTargets] = useState<string[]>(data.targets ?? []);
+  const [experiences, setExperiences] = useState<Experience[]>(() => {
+    return Array.isArray(data.experience)
+      ? data.experience.map((e) => ({
+          id:
+            e.id ||
+            (typeof crypto !== "undefined" && crypto.randomUUID
+              ? crypto.randomUUID()
+              : Math.random().toString(36).slice(2)),
+          title: e.title || e.role || "",
+          company: e.company || "",
+          startDate: e.startDate || "",
+          endDate: e.endDate || "",
+          current: Boolean(e.current),
+          description: e.description || "",
+          period: e.period || "",
+        }))
+      : [];
+  });
+
   const [newSkill, setNewSkill] = useState("");
+  const [skillError, setSkillError] = useState("");
   const [newTarget, setNewTarget] = useState("");
+  const [targetError, setTargetError] = useState("");
+
+  const [avatar, setAvatar] = useState<string | null>(user.avatar ?? null);
+  const [previewAvatar, setPreviewAvatar] = useState<string | null>(null);
+  const [avatarLoading, setAvatarLoading] = useState(false);
+  const [avatarError, setAvatarError] = useState("");
+  const [avatarSuccess, setAvatarSuccess] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [form, setForm] = useState({
     name: user.name,
     email: user.email,
@@ -1525,69 +1622,241 @@ function EditProfileSection({
   });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
-  const [skillBusy, setSkillBusy] = useState(false);
-  const [targetBusy, setTargetBusy] = useState(false);
+
+  // Experience form state
+  const [isExpFormOpen, setIsExpFormOpen] = useState(false);
+  const [editingExpId, setEditingExpId] = useState<string | null>(null);
+  const [expForm, setExpForm] = useState({
+    title: "",
+    company: "",
+    startDate: "",
+    endDate: "",
+    current: false,
+    description: "",
+  });
+  const [expFormError, setExpFormError] = useState("");
 
   const inputCls =
     "w-full bg-[#f0f4f8] border border-[#0d1b2a]/10 rounded-xl px-4 py-3 text-[#0d1b2a] placeholder-[#4a6080]/50 text-sm focus:outline-none focus:ring-2 focus:ring-[#00bfa6]/30 focus:border-[#00bfa6]/60 transition-all";
 
-  async function addSkill() {
+  function addSkill() {
     const value = newSkill.trim();
-    if (!value || skills.includes(value)) return;
-    setSkillBusy(true);
-    try {
-      const created = await addSkillApi(value);
-      setSkills((prev) => [...prev, created.skill ?? value]);
-      setNewSkill("");
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Failed to add skill.");
-    } finally {
-      setSkillBusy(false);
+    if (!value) return;
+    if (skills.some((s) => s.trim().toLowerCase() === value.toLowerCase())) {
+      setSkillError("Skill is already in your list.");
+      return;
     }
+    setSkillError("");
+    setSkills((prev) => [...prev, value]);
+    setNewSkill("");
   }
 
-  async function removeSkill(skill: string, id?: string) {
-    setSkillBusy(true);
-    try {
-      await deleteSkillApi(id ?? skill);
-      setSkills((prev) => prev.filter((s) => s !== skill));
-    } catch (err) {
-      setSaveError(
-        err instanceof Error ? err.message : "Failed to delete skill.",
-      );
-    } finally {
-      setSkillBusy(false);
-    }
+  function removeSkill(skillToRemove: string) {
+    setSkills((prev) => prev.filter((s) => s !== skillToRemove));
   }
 
-  async function addTarget() {
+  function addTarget() {
     const value = newTarget.trim();
-    if (!value || targets.includes(value)) return;
-    setTargetBusy(true);
-    try {
-      const created = await addTargetApi(value);
-      setTargets((prev) => [...prev, created.target ?? value]);
-      setNewTarget("");
-    } catch (err) {
-      setSaveError(
-        err instanceof Error ? err.message : "Failed to add target.",
+    if (!value) return;
+    if (targets.some((t) => t.trim().toLowerCase() === value.toLowerCase())) {
+      setTargetError("This target role or company is already in your list.");
+      return;
+    }
+    setTargetError("");
+    setTargets((prev) => [...prev, value]);
+    setNewTarget("");
+  }
+
+  function removeTarget(targetToRemove: string) {
+    setTargets((prev) => prev.filter((t) => t !== targetToRemove));
+  }
+
+  function startAddExperience() {
+    setExpForm({
+      title: "",
+      company: "",
+      startDate: "",
+      endDate: "",
+      current: false,
+      description: "",
+    });
+    setEditingExpId(null);
+    setExpFormError("");
+    setIsExpFormOpen(true);
+  }
+
+  function startEditExperience(exp: Experience) {
+    setExpForm({
+      title: exp.title || exp.role || "",
+      company: exp.company || "",
+      startDate: exp.startDate || "",
+      endDate: exp.endDate || "",
+      current: Boolean(exp.current),
+      description: exp.description || "",
+    });
+    setEditingExpId(exp.id || null);
+    setExpFormError("");
+    setIsExpFormOpen(true);
+  }
+
+  function cancelExpForm() {
+    setExpForm({
+      title: "",
+      company: "",
+      startDate: "",
+      endDate: "",
+      current: false,
+      description: "",
+    });
+    setEditingExpId(null);
+    setExpFormError("");
+    setIsExpFormOpen(false);
+  }
+
+  function handleSaveExperienceEntry() {
+    const title = expForm.title.trim();
+    const company = expForm.company.trim();
+
+    if (!title) {
+      setExpFormError("Job title is required.");
+      return;
+    }
+    if (!company) {
+      setExpFormError("Company name is required.");
+      return;
+    }
+
+    if (!expForm.current && expForm.startDate && expForm.endDate) {
+      if (expForm.endDate < expForm.startDate) {
+        setExpFormError("End date cannot precede start date.");
+        return;
+      }
+    }
+
+    setExpFormError("");
+
+    const entryId =
+      editingExpId ||
+      (typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2));
+
+    const updatedEntry: Experience = {
+      id: entryId,
+      title,
+      role: title,
+      company,
+      startDate: expForm.startDate || undefined,
+      endDate: expForm.current ? null : expForm.endDate || null,
+      current: expForm.current,
+      description: expForm.description.trim() || null,
+    };
+    updatedEntry.period = getExperiencePeriodText(updatedEntry);
+
+    if (editingExpId) {
+      setExperiences((prev) =>
+        prev.map((item) => (item.id === editingExpId ? updatedEntry : item)),
       );
-    } finally {
-      setTargetBusy(false);
+    } else {
+      setExperiences((prev) => [...prev, updatedEntry]);
+    }
+
+    cancelExpForm();
+  }
+
+  function removeExperience(idToRemove?: string) {
+    if (!idToRemove) return;
+    setExperiences((prev) => prev.filter((item) => item.id !== idToRemove));
+    if (editingExpId === idToRemove) {
+      cancelExpForm();
     }
   }
 
-  async function removeTarget(target: string, id?: string) {
-    setTargetBusy(true);
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+
+    setAvatarError("");
+    setAvatarSuccess("");
+
+    if (file.size > 4 * 1024 * 1024) {
+      setAvatarError("Image file size must be less than 4 MB.");
+      return;
+    }
+
+    const validMimes = ["image/jpeg", "image/png", "image/gif"];
+    if (!validMimes.includes(file.type)) {
+      setAvatarError("Only JPG, PNG, and GIF images are allowed.");
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setPreviewAvatar(previewUrl);
+
+    setAvatarLoading(true);
     try {
-      await deleteTargetApi(id ?? target);
-      setTargets((prev) => prev.filter((t) => t !== target));
-    } catch (err) {
-      setSaveError(
-        err instanceof Error ? err.message : "Failed to remove target.",
+      const updated = await uploadAvatarApi(file);
+      const newAvatarUrl = updated.avatar ?? null;
+      setAvatar(newAvatarUrl);
+      setPreviewAvatar(null);
+      setAvatarSuccess("Profile photo updated successfully!");
+      onProfileSaved(
+        { ...user, avatar: newAvatarUrl },
+        skills,
+        targets,
+        experiences,
       );
+      try {
+        const stored = JSON.parse(localStorage.getItem("user") || "{}");
+        localStorage.setItem(
+          "user",
+          JSON.stringify({ ...stored, avatar: newAvatarUrl }),
+        );
+      } catch {}
+    } catch (err: any) {
+      setPreviewAvatar(null);
+      const msg =
+        err?.response?.data?.message ||
+        err?.message ||
+        "Failed to upload profile photo.";
+      setAvatarError(msg);
     } finally {
-      setTargetBusy(false);
+      setAvatarLoading(false);
+    }
+  }
+
+  async function handleRemovePhoto() {
+    if (!avatar && !previewAvatar) return;
+    setAvatarLoading(true);
+    setAvatarError("");
+    setAvatarSuccess("");
+    try {
+      await removeAvatarApi();
+      setAvatar(null);
+      setPreviewAvatar(null);
+      setAvatarSuccess("Profile photo removed.");
+      onProfileSaved(
+        { ...user, avatar: null },
+        skills,
+        targets,
+        experiences,
+      );
+      try {
+        const stored = JSON.parse(localStorage.getItem("user") || "{}");
+        localStorage.setItem(
+          "user",
+          JSON.stringify({ ...stored, avatar: null }),
+        );
+      } catch {}
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.message ||
+        err?.message ||
+        "Failed to remove profile photo.";
+      setAvatarError(msg);
+    } finally {
+      setAvatarLoading(false);
     }
   }
 
@@ -1601,8 +1870,16 @@ function EditProfileSection({
         title: form.title,
         location: form.location,
         about: form.about,
+        skills,
+        targets,
+        experience: experiences,
       });
-      onProfileSaved(updated, skills, targets);
+      onProfileSaved(
+        { ...updated, avatar },
+        skills,
+        targets,
+        experiences,
+      );
       onBack();
     } catch (err) {
       setSaveError(
@@ -1650,11 +1927,15 @@ function EditProfileSection({
         {/* Avatar card */}
         <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-7 flex flex-col items-center text-center h-fit">
           <div className="relative mb-5">
-            {user.avatar ? (
+            {previewAvatar || avatar ? (
               <img
-                src={user.avatar}
-                alt={user.name}
+                src={getAvatarUrl(previewAvatar || avatar)}
+                alt={form.name}
                 className="w-24 h-24 rounded-full object-cover"
+                onError={() => {
+                  setPreviewAvatar(null);
+                  setAvatar(null);
+                }}
               />
             ) : (
               <div
@@ -1669,7 +1950,13 @@ function EditProfileSection({
                   .toUpperCase()}
               </div>
             )}
-            <button className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-[#0d1b2a] flex items-center justify-center shadow-lg hover:bg-[#1a2f45] transition-colors">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={avatarLoading}
+              title="Change Photo"
+              className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-[#0d1b2a] flex items-center justify-center shadow-lg hover:bg-[#1a2f45] transition-colors disabled:opacity-50"
+            >
               <Camera className="w-3.5 h-3.5 text-white" />
             </button>
           </div>
@@ -1682,18 +1969,49 @@ function EditProfileSection({
           <p className="text-[#4a6080] text-xs mb-4">
             JPG, PNG or GIF · Max 4MB
           </p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/gif"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
           <button
-            className="w-full border border-[#0d1b2a]/15 text-[#0d1b2a] text-sm py-2 rounded-xl hover:bg-[#f0f4f8] transition-colors"
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={avatarLoading}
+            className="w-full flex items-center justify-center gap-2 border border-[#0d1b2a]/15 text-[#0d1b2a] text-sm py-2 rounded-xl hover:bg-[#f0f4f8] transition-colors disabled:opacity-50"
             style={{ fontWeight: 500 }}
           >
-            Upload Photo
+            {avatarLoading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Processing...</span>
+              </>
+            ) : (
+              "Upload Photo"
+            )}
           </button>
           <button
-            className="mt-2 w-full text-rose-500 text-sm py-2 rounded-xl hover:bg-rose-50 transition-colors"
+            type="button"
+            onClick={handleRemovePhoto}
+            disabled={avatarLoading || (!avatar && !previewAvatar)}
+            className="mt-2 w-full text-rose-500 text-sm py-2 rounded-xl hover:bg-rose-50 transition-colors disabled:opacity-40"
             style={{ fontWeight: 500 }}
           >
             Remove Photo
           </button>
+
+          {avatarSuccess && (
+            <div className="mt-3 text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg w-full">
+              {avatarSuccess}
+            </div>
+          )}
+          {avatarError && (
+            <div className="mt-3 text-xs text-rose-600 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-lg w-full">
+              {avatarError}
+            </div>
+          )}
         </div>
 
         {/* Form */}
@@ -1802,99 +2120,365 @@ function EditProfileSection({
 
           {/* Skills */}
           <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
-            <p
-              className="text-[#0d1b2a] text-sm mb-3"
-              style={{ fontWeight: 600 }}
-            >
-              Skills
-            </p>
-            <div className="flex flex-wrap gap-2 mb-3">
-              {skills.map((s) => (
-                <span
-                  key={s}
-                  className="flex items-center gap-1.5 text-xs bg-[#00bfa6]/10 text-[#00bfa6] border border-[#00bfa6]/20 px-2.5 py-1 rounded-full"
-                  style={{ fontWeight: 500 }}
-                >
-                  {s}
-                  <button
-                    onClick={() => removeSkill(s)}
-                    disabled={skillBusy}
-                    className="hover:text-rose-500 transition-colors disabled:opacity-50"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              ))}
+            <div className="flex items-center justify-between mb-3">
+              <p
+                className="text-[#0d1b2a] text-sm font-semibold"
+              >
+                Skills
+              </p>
+              <span className="text-[#4a6080] text-xs">
+                {skills.length} {skills.length === 1 ? "skill" : "skills"}
+              </span>
             </div>
+            {skills.length === 0 ? (
+              <p className="text-[#4a6080] text-xs mb-3">
+                No skills added yet. Add your key technical skills below.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {skills.map((s) => (
+                  <span
+                    key={s}
+                    className="flex items-center gap-1.5 text-xs bg-[#00bfa6]/10 text-[#00bfa6] border border-[#00bfa6]/20 px-2.5 py-1 rounded-full font-medium"
+                  >
+                    {s}
+                    <button
+                      type="button"
+                      onClick={() => removeSkill(s)}
+                      className="hover:text-rose-500 transition-colors"
+                      title={`Remove ${s}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="flex gap-2">
               <input
                 className={`${inputCls} flex-1`}
-                placeholder="Add a skill…"
+                placeholder="Add a skill (e.g. React, Java, TypeScript)…"
                 value={newSkill}
-                onChange={(e) => setNewSkill(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addSkill()}
-                disabled={skillBusy}
+                onChange={(e) => {
+                  setNewSkill(e.target.value);
+                  if (skillError) setSkillError("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addSkill();
+                  }
+                }}
               />
               <button
+                type="button"
                 onClick={addSkill}
-                disabled={skillBusy}
-                className="bg-[#0d1b2a] text-white px-4 rounded-xl hover:bg-[#1a2f45] transition-colors disabled:opacity-50"
+                className="bg-[#0d1b2a] text-white px-4 rounded-xl hover:bg-[#1a2f45] transition-colors flex items-center justify-center shrink-0"
+                title="Add skill"
               >
-                {skillBusy ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Plus className="w-4 h-4" />
-                )}
+                <Plus className="w-4 h-4" />
               </button>
             </div>
+            {skillError && (
+              <p className="text-rose-500 text-xs mt-1.5">{skillError}</p>
+            )}
           </div>
 
           {/* Target roles */}
           <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
-            <p
-              className="text-[#0d1b2a] text-sm mb-3"
-              style={{ fontWeight: 600 }}
-            >
-              Target Roles & Companies
-            </p>
-            <div className="flex flex-wrap gap-2 mb-3">
-              {targets.map((t) => (
-                <span
-                  key={t}
-                  className="flex items-center gap-1.5 text-xs bg-[#f0f4f8] text-[#4a6080] border border-[#0d1b2a]/8 px-2.5 py-1 rounded-full"
-                >
-                  {t}
-                  <button
-                    onClick={() => removeTarget(t)}
-                    disabled={targetBusy}
-                    className="hover:text-rose-500 transition-colors disabled:opacity-50"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              ))}
+            <div className="flex items-center justify-between mb-3">
+              <p
+                className="text-[#0d1b2a] text-sm font-semibold"
+              >
+                Target Roles & Companies
+              </p>
+              <span className="text-[#4a6080] text-xs">
+                {targets.length} {targets.length === 1 ? "entry" : "entries"}
+              </span>
             </div>
+            {targets.length === 0 ? (
+              <p className="text-[#4a6080] text-xs mb-3">
+                No target roles or companies added yet. Add some below.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {targets.map((t) => (
+                  <span
+                    key={t}
+                    className="flex items-center gap-1.5 text-xs bg-[#f0f4f8] text-[#0d1b2a] border border-[#0d1b2a]/10 px-2.5 py-1 rounded-full font-medium"
+                  >
+                    <span>{t}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeTarget(t)}
+                      className="text-[#4a6080] hover:text-rose-500 transition-colors"
+                      title={`Remove ${t}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="flex gap-2">
               <input
                 className={`${inputCls} flex-1`}
-                placeholder="Add role or company…"
+                placeholder="e.g. Frontend Engineer, Google, Staff Engineer, Stripe…"
                 value={newTarget}
-                onChange={(e) => setNewTarget(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addTarget()}
-                disabled={targetBusy}
+                onChange={(e) => {
+                  setNewTarget(e.target.value);
+                  if (targetError) setTargetError("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addTarget();
+                  }
+                }}
               />
               <button
+                type="button"
                 onClick={addTarget}
-                disabled={targetBusy}
-                className="bg-[#0d1b2a] text-white px-4 rounded-xl hover:bg-[#1a2f45] transition-colors disabled:opacity-50"
+                className="bg-[#0d1b2a] text-white px-4 rounded-xl hover:bg-[#1a2f45] transition-colors flex items-center justify-center shrink-0"
+                title="Add target role or company"
               >
-                {targetBusy ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Plus className="w-4 h-4" />
-                )}
+                <Plus className="w-4 h-4" />
               </button>
             </div>
+            {targetError && (
+              <p className="text-rose-500 text-xs mt-1.5">{targetError}</p>
+            )}
+          </div>
+
+          {/* Experience Section */}
+          <div className="bg-white rounded-2xl border border-[#0d1b2a]/8 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p
+                  className="text-[#0d1b2a] text-sm font-semibold"
+                >
+                  Experience
+                </p>
+                <p className="text-[#4a6080] text-xs mt-0.5">
+                  Highlight your past and current roles.
+                </p>
+              </div>
+              {!isExpFormOpen && (
+                <button
+                  type="button"
+                  onClick={startAddExperience}
+                  className="flex items-center gap-1.5 text-xs bg-[#0d1b2a] text-white px-3 py-1.5 rounded-lg hover:bg-[#1a2f45] transition-colors font-medium"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add Experience
+                </button>
+              )}
+            </div>
+
+            {/* List of existing experiences */}
+            {experiences.length === 0 && !isExpFormOpen ? (
+              <p className="text-[#4a6080] text-xs">
+                No experience added yet. Click &quot;Add Experience&quot; to add your work history.
+              </p>
+            ) : (
+              <div className="space-y-3 mb-4">
+                {experiences.map((exp) => (
+                  <div
+                    key={exp.id || `${exp.title || exp.role}-${exp.company}`}
+                    className="flex items-start justify-between p-3.5 rounded-xl bg-[#f0f4f8] border border-[#0d1b2a]/8 hover:border-[#0d1b2a]/15 transition-all"
+                  >
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-[#0d1b2a]/6 flex items-center justify-center shrink-0 mt-0.5">
+                        <Briefcase className="w-4 h-4 text-[#4a6080]" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-semibold text-[#0d1b2a]">
+                            {exp.title || exp.role}
+                          </span>
+                          <span className="text-sm text-[#4a6080]">·</span>
+                          <span className="text-sm font-medium text-[#4a6080]">
+                            {exp.company}
+                          </span>
+                          {exp.current && (
+                            <span className="text-[10px] bg-[#00bfa6]/15 text-[#00bfa6] font-semibold px-2 py-0.5 rounded-full">
+                              Current
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-[#4a6080] mt-0.5">
+                          {getExperiencePeriodText(exp)}
+                        </p>
+                        {exp.description && (
+                          <p className="text-xs text-[#4a6080]/90 mt-1 leading-relaxed whitespace-pre-line line-clamp-2">
+                            {exp.description}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                      <button
+                        type="button"
+                        onClick={() => startEditExperience(exp)}
+                        className="p-1.5 text-[#4a6080] hover:text-[#0d1b2a] hover:bg-white rounded-lg transition-colors"
+                        title="Edit entry"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeExperience(exp.id)}
+                        className="p-1.5 text-[#4a6080] hover:text-rose-600 hover:bg-white rounded-lg transition-colors"
+                        title="Remove entry"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Experience Add/Edit Form */}
+            {isExpFormOpen && (
+              <div className="mt-4 p-4 rounded-xl border border-[#00bfa6]/30 bg-[#00bfa6]/5 space-y-3">
+                <div className="flex items-center justify-between pb-1">
+                  <p className="text-[#0d1b2a] text-xs font-semibold">
+                    {editingExpId ? "Edit Experience Entry" : "New Experience Entry"}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={cancelExpForm}
+                    className="text-[#4a6080] hover:text-[#0d1b2a] text-xs"
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                {expFormError && (
+                  <div className="flex items-center gap-1.5 text-rose-600 text-xs bg-rose-50 border border-rose-200 px-3 py-2 rounded-lg">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{expFormError}</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-[#0d1b2a] mb-1">
+                      Job Title <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      className={inputCls}
+                      placeholder="e.g. Software Engineer"
+                      value={expForm.title}
+                      onChange={(e) =>
+                        setExpForm({ ...expForm, title: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#0d1b2a] mb-1">
+                      Company Name <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      className={inputCls}
+                      placeholder="e.g. Google, Stripe, Startup"
+                      value={expForm.company}
+                      onChange={(e) =>
+                        setExpForm({ ...expForm, company: e.target.value })
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-[#0d1b2a] mb-1">
+                      Start Date
+                    </label>
+                    <input
+                      type="month"
+                      className={inputCls}
+                      value={expForm.startDate}
+                      onChange={(e) =>
+                        setExpForm({ ...expForm, startDate: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#0d1b2a] mb-1">
+                      End Date {expForm.current && <span className="text-[#4a6080] font-normal">(Present)</span>}
+                    </label>
+                    <input
+                      type="month"
+                      disabled={expForm.current}
+                      className={`${inputCls} ${
+                        expForm.current
+                          ? "opacity-60 cursor-not-allowed bg-slate-100"
+                          : ""
+                      }`}
+                      value={expForm.current ? "" : expForm.endDate}
+                      onChange={(e) =>
+                        setExpForm({ ...expForm, endDate: e.target.value })
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-0.5">
+                  <input
+                    id="current-position-toggle"
+                    type="checkbox"
+                    checked={expForm.current}
+                    onChange={(e) =>
+                      setExpForm({
+                        ...expForm,
+                        current: e.target.checked,
+                        endDate: e.target.checked ? "" : expForm.endDate,
+                      })
+                    }
+                    className="w-4 h-4 rounded text-[#00bfa6] focus:ring-[#00bfa6]/30 border-[#0d1b2a]/20 cursor-pointer accent-[#00bfa6]"
+                  />
+                  <label
+                    htmlFor="current-position-toggle"
+                    className="text-xs text-[#0d1b2a] font-medium cursor-pointer select-none"
+                  >
+                    Current Position (I currently work here)
+                  </label>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-[#0d1b2a] mb-1">
+                    Responsibilities & Achievements <span className="text-[#4a6080] font-normal">(Optional)</span>
+                  </label>
+                  <textarea
+                    rows={3}
+                    className={`${inputCls} resize-none`}
+                    placeholder="Briefly describe your key responsibilities, technologies used, or impact…"
+                    value={expForm.description}
+                    onChange={(e) =>
+                      setExpForm({ ...expForm, description: e.target.value })
+                    }
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={cancelExpForm}
+                    className="px-3.5 py-1.5 text-xs text-[#4a6080] hover:text-[#0d1b2a] rounded-lg transition-colors font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveExperienceEntry}
+                    className="bg-[#00bfa6] text-[#0d1b2a] px-4 py-1.5 rounded-lg text-xs font-semibold hover:bg-[#00d4b8] transition-colors"
+                  >
+                    {editingExpId ? "Update Entry" : "Add Entry"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Save / Cancel */}
@@ -1988,9 +2572,18 @@ export default function CandidateDashboard() {
     user: UserProfile,
     skills: string[],
     targets: string[],
+    experience?: Experience[],
   ) {
     setDashboardData((prev) =>
-      prev ? { ...prev, user, skills, targets } : prev,
+      prev
+        ? {
+            ...prev,
+            user,
+            skills,
+            targets,
+            experience: experience ?? prev.experience ?? [],
+          }
+        : prev,
     );
   }
 
@@ -2103,6 +2696,7 @@ export default function CandidateDashboard() {
       onSectionChange={setActiveSection}
       userName={userName}
       userInitials={userInitials}
+      userAvatar={dashboardData?.user?.avatar}
     >
       <div className="flex items-center justify-between mb-8">
         <div>

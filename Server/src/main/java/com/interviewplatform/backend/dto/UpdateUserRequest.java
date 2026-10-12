@@ -64,4 +64,34 @@ public class UpdateUserRequest {
     public void setAbout(String about) {
         this.about = about;
     }
+
+    private java.util.List<String> skills;
+
+    private java.util.List<String> targets;
+
+    private java.util.List<com.interviewplatform.backend.model.Experience> experience;
+
+    public java.util.List<String> getSkills() {
+        return skills;
+    }
+
+    public void setSkills(java.util.List<String> skills) {
+        this.skills = skills;
+    }
+
+    public java.util.List<String> getTargets() {
+        return targets;
+    }
+
+    public void setTargets(java.util.List<String> targets) {
+        this.targets = targets;
+    }
+
+    public java.util.List<com.interviewplatform.backend.model.Experience> getExperience() {
+        return experience;
+    }
+
+    public void setExperience(java.util.List<com.interviewplatform.backend.model.Experience> experience) {
+        this.experience = experience;
+    }
 }

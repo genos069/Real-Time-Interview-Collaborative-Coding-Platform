@@ -97,7 +97,8 @@ public class UserService {
                 user.getName(),
                 user.getEmail(),
                 user.getRole(),
-                token
+                token,
+                user.getAvatar()
         );
     }
 
@@ -114,7 +115,10 @@ public class UserService {
                 user.getTitle(),
                 user.getLocation(),
                 user.getAvatar(),
-                user.getAbout()
+                user.getAbout(),
+                user.getSkills(),
+                user.getTargets(),
+                user.getExperience()
         );
     }
 
@@ -162,6 +166,18 @@ public class UserService {
             user.setAbout(request.getAbout());
         }
 
+        if (request.getSkills() != null) {
+            user.setSkills(request.getSkills());
+        }
+
+        if (request.getTargets() != null) {
+            user.setTargets(request.getTargets());
+        }
+
+        if (request.getExperience() != null) {
+            user.setExperience(request.getExperience());
+        }
+
         User updatedUser = userRepository.save(user);
 
         return new UserResponse(
@@ -172,7 +188,10 @@ public class UserService {
                 updatedUser.getTitle(),
                 updatedUser.getLocation(),
                 updatedUser.getAvatar(),
-                updatedUser.getAbout()
+                updatedUser.getAbout(),
+                updatedUser.getSkills(),
+                updatedUser.getTargets(),
+                updatedUser.getExperience()
         );
     }
 

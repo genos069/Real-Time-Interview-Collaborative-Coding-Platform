@@ -23,6 +23,7 @@ import {
   Square, Circle, Undo2, Trash2, Palette, MoreVertical, Loader2,
   ShieldAlert, LogOut, Star,
 } from "lucide-react";
+import { BackgroundBlurProcessor } from "../../services/backgroundBlurService";
 
 /* ─── constants ─── */
 const INTER = "'Inter', sans-serif";
@@ -71,15 +72,21 @@ export function normalizeInterviewLanguage(lang?: string | null): SupportedInter
   return "Java";
 }
 
-const SHORTCUTS = [
-  { keys: ["Ctrl", "Enter"], label: "Run Code" },
-  { keys: ["Ctrl", "Shift", "Enter"], label: "Submit Code" },
-  { keys: ["Ctrl", "/"], label: "Toggle Comment" },
-  { keys: ["Ctrl", "B"], label: "Toggle Code / Chat" },
-  { keys: ["Ctrl", "J"], label: "Toggle Console" },
-  { keys: ["Ctrl", "D"], label: "Duplicate Line" },
-  { keys: ["Ctrl", "Z"], label: "Undo" },
-  { keys: ["F11"], label: "Fullscreen" },
+export interface ShortcutItem {
+  id: string;
+  label: string;
+  keys: string[];
+}
+
+export const SHORTCUTS: ShortcutItem[] = [
+  { id: "run-code", keys: ["Ctrl", "Enter"], label: "Run Code" },
+  { id: "redo", keys: ["Ctrl", "Y"], label: "Redo" },
+  { id: "toggle-comment", keys: ["Ctrl", "/"], label: "Toggle Comment" },
+  { id: "toggle-code-chat", keys: ["Ctrl", "B"], label: "Toggle Code / Chat" },
+  { id: "toggle-console", keys: ["Ctrl", "J"], label: "Toggle Console" },
+  { id: "duplicate-line", keys: ["Ctrl", "D"], label: "Duplicate Line" },
+  { id: "undo", keys: ["Ctrl", "Z"], label: "Undo" },
+  { id: "editor-fullscreen", keys: ["F10"], label: "Editor Fullscreen" },
 ];
 
 type PresenceMessage = {
@@ -441,7 +448,6 @@ function ParticipantsSidebar({
               {p.cam ? <Video size={12} color={C.ts} /> : <VideoOff size={12} color={C.rose} />}
               <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
                 <Wifi size={10} color={p.ping < 60 ? C.emerald : p.ping < 120 ? C.amber : C.rose} />
-                <span style={{ fontSize: 9, color: p.ping < 60 ? C.emerald : p.ping < 120 ? C.amber : C.rose, fontFamily: MONO }}>{p.ping}ms</span>
               </div>
               <button style={{ width: 22, height: 22, borderRadius: 6, border: "none", cursor: "pointer", background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", color: C.tm }}>
                 <MoreVertical size={11} />
@@ -458,9 +464,9 @@ function ParticipantsSidebar({
           width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
           background: `${C.blue}18`, border: `1px solid ${C.blue}30`,
           borderRadius: 10, padding: "9px 0",
-          color: C.blue, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: INTER,
+          color: C.blue, fontSize: 12, fontWeight: 600, fontFamily: INTER,
         }}>
-          <Users size={13} /> Invite Participant
+          <Users size={13} /> Participants
         </button>
       </div>
     </div>
@@ -531,6 +537,24 @@ function drawShapeOnCtx(
   ctx.restore();
 }
 
+function normalizeHex(hexStr: string): string | null {
+  if (!hexStr) return null;
+  let clean = hexStr.trim();
+  if (clean.startsWith("#")) clean = clean.slice(1);
+  if (/^[0-9A-Fa-f]{3}$/.test(clean)) {
+    clean = clean.split("").map(c => c + c).join("");
+  }
+  if (/^[0-9A-Fa-f]{6}$/.test(clean)) {
+    return `#${clean.toUpperCase()}`;
+  }
+  return null;
+}
+
+function to7Hex(hexStr: string): string {
+  const norm = normalizeHex(hexStr);
+  return norm ? norm.toLowerCase() : "#00bfff";
+}
+
 interface WhiteboardProps {
   onClose: () => void;
   roomId?: string;
@@ -553,6 +577,141 @@ function Whiteboard({
   const [tool, setTool] = useState<DrawTool>("pen");
   const [color, setColor] = useState("#00BFFF");
   const [size, setSize] = useState(3);
+  const [sizeInput, setSizeInput] = useState("3");
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [hexInput, setHexInput] = useState("#00BFFF");
+  const [hexError, setHexError] = useState(false);
+  const colorPickerRef = useRef<HTMLDivElement>(null);
+  const paletteBtnRef = useRef<HTMLButtonElement>(null);
+
+  const MIN_SIZE = 1;
+  const MAX_SIZE = 100;
+  const QUICK_SWATCHES = [
+    "#FF3366", "#FF6B00", "#FFD600", "#00E676", "#00B0FF", "#7C4DFF", "#FF4081", "#FFFFFF"
+  ];
+
+  const handleSelectSize = (s: number) => {
+    setSize(s);
+    setSizeInput(String(s));
+  };
+
+  const handleSizeInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    setSizeInput(raw);
+    if (raw === "") return;
+    const num = parseInt(raw, 10);
+    if (!isNaN(num)) {
+      const clamped = Math.max(MIN_SIZE, Math.min(MAX_SIZE, num));
+      setSize(clamped);
+    }
+  };
+
+  const handleSizeInputBlur = () => {
+    const num = parseInt(sizeInput, 10);
+    if (isNaN(num) || num < MIN_SIZE) {
+      setSize(MIN_SIZE);
+      setSizeInput(String(MIN_SIZE));
+    } else if (num > MAX_SIZE) {
+      setSize(MAX_SIZE);
+      setSizeInput(String(MAX_SIZE));
+    } else {
+      setSize(num);
+      setSizeInput(String(num));
+    }
+  };
+
+  const handleSizeInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      handleSizeInputBlur();
+      (e.target as HTMLInputElement).blur();
+    } else if (e.key === "Escape") {
+      setSizeInput(String(size));
+      (e.target as HTMLInputElement).blur();
+    }
+  };
+
+  const handleSelectPresetColor = (c: string) => {
+    setColor(c);
+    setHexInput(c);
+    setHexError(false);
+    setShowColorPicker(false);
+  };
+
+  const handleNativeColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value.toUpperCase();
+    setColor(val);
+    setHexInput(val);
+    setHexError(false);
+  };
+
+  const handleHexInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value.trim().toUpperCase();
+    setHexInput(raw);
+    const normalized = normalizeHex(raw);
+    if (normalized) {
+      setHexError(false);
+      setColor(normalized);
+    } else if (raw.length >= 3) {
+      setHexError(true);
+    } else {
+      setHexError(false);
+    }
+  };
+
+  const handleHexInputBlur = () => {
+    const normalized = normalizeHex(hexInput);
+    if (normalized) {
+      setColor(normalized);
+      setHexInput(normalized);
+      setHexError(false);
+    } else {
+      setHexInput(color);
+      setHexError(false);
+    }
+  };
+
+  const handleHexInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      handleHexInputBlur();
+    } else if (e.key === "Escape") {
+      setHexInput(color);
+      setHexError(false);
+      setShowColorPicker(false);
+    }
+  };
+
+  const handleSelectCustomPreset = (c: string) => {
+    const norm = normalizeHex(c) || c;
+    setColor(norm);
+    setHexInput(norm);
+    setHexError(false);
+  };
+
+  useEffect(() => {
+    if (!showColorPicker) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      if (
+        colorPickerRef.current &&
+        !colorPickerRef.current.contains(e.target as Node) &&
+        paletteBtnRef.current &&
+        !paletteBtnRef.current.contains(e.target as Node)
+      ) {
+        setShowColorPicker(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowColorPicker(false);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showColorPicker]);
+
   const drawing = useRef(false);
   const startPos = useRef<WhiteboardPoint>({ x: 0, y: 0 });
   const lastPos = useRef<WhiteboardPoint>({ x: 0, y: 0 });
@@ -563,6 +722,7 @@ function Whiteboard({
 
   const COLORS_WB = ["#F1F5F9", "#3B82F6", "#10B981", "#F43F5E", "#F59E0B", "#8B5CF6", "#EC4899", "#00BFFF"];
   const SIZES = [2, 4, 8, 14];
+  const isCustomColor = !COLORS_WB.some(c => c.toUpperCase() === color.toUpperCase());
 
   function getCtx() {
     return canvasRef.current ? canvasRef.current.getContext("2d") : null;
@@ -707,6 +867,9 @@ function Whiteboard({
   }, [onRegisterRemoteWhiteboardHandler, handleRemoteOperation]);
 
   function onDown(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (showColorPicker) {
+      setShowColorPicker(false);
+    }
     if (!canvasRef.current) return;
     try {
       (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -863,7 +1026,7 @@ function Whiteboard({
         {/* Tools */}
         <div style={{ display: "flex", gap: 3 }}>
           {toolBtns.map(t => (
-            <button key={t.id} onClick={() => setTool(t.id)} title={t.label} style={{
+            <button key={t.id} onClick={() => setTool(t.id)} title={t.label} aria-label={`Select ${t.label} tool`} style={{
               width: 30, height: 30, borderRadius: 8, border: `1px solid ${tool === t.id ? C.blue + "60" : C.border}`, cursor: "pointer",
               background: tool === t.id ? `${C.blue}25` : "rgba(255,255,255,0.04)",
               color: tool === t.id ? C.blue : C.ts,
@@ -875,14 +1038,251 @@ function Whiteboard({
         <div style={{ width: 1, height: 22, background: C.border }} />
 
         {/* Colors */}
-        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <Palette size={12} color={C.tm} />
+        <div style={{ display: "flex", gap: 4, alignItems: "center", position: "relative" }}>
+          {/* Custom Color Picker Button */}
+          <button
+            ref={paletteBtnRef}
+            type="button"
+            onClick={() => setShowColorPicker(prev => !prev)}
+            title={isCustomColor ? `Custom color: ${color} (Click to open picker)` : "Custom RGB color picker"}
+            aria-label="Open custom color picker"
+            aria-expanded={showColorPicker}
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 7,
+              border: `1.5px solid ${isCustomColor ? color : showColorPicker ? C.blue : C.border}`,
+              background: isCustomColor ? `${color}25` : showColorPicker ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              position: "relative",
+              padding: 0,
+              transition: "all 0.15s ease",
+            }}
+          >
+            <Palette size={13} color={isCustomColor ? color : showColorPicker ? C.blue : C.ts} />
+            {isCustomColor && (
+              <span
+                style={{
+                  position: "absolute",
+                  bottom: 2,
+                  right: 2,
+                  width: 5,
+                  height: 5,
+                  borderRadius: "50%",
+                  background: color,
+                  boxShadow: "0 0 2px rgba(0,0,0,0.8)",
+                }}
+              />
+            )}
+          </button>
+
+          {/* Preset Colors */}
           {COLORS_WB.map(c => (
-            <button key={c} onClick={() => setColor(c)} style={{
-              width: 18, height: 18, borderRadius: "50%", background: c, border: `2px solid ${color === c ? "#fff" : C.border}`,
-              cursor: "pointer", transition: "transform 0.1s", transform: color === c ? "scale(1.25)" : "scale(1)",
-            }} />
+            <button
+              key={c}
+              type="button"
+              onClick={() => handleSelectPresetColor(c)}
+              title={`Preset color ${c}`}
+              aria-label={`Select color ${c}`}
+              style={{
+                width: 18,
+                height: 18,
+                borderRadius: "50%",
+                background: c,
+                border: `2px solid ${color.toUpperCase() === c.toUpperCase() ? "#fff" : C.border}`,
+                cursor: "pointer",
+                transition: "transform 0.1s",
+                transform: color.toUpperCase() === c.toUpperCase() ? "scale(1.25)" : "scale(1)",
+                padding: 0,
+              }}
+            />
           ))}
+
+          {/* Custom Color Picker Popover */}
+          {showColorPicker && (
+            <div
+              ref={colorPickerRef}
+              style={{
+                position: "absolute",
+                top: "calc(100% + 8px)",
+                left: 0,
+                zIndex: 60,
+                background: "#1e293b",
+                border: `1px solid ${C.borderHover}`,
+                borderRadius: 10,
+                padding: "10px 12px",
+                boxShadow: "0 12px 30px -4px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                width: 220,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: C.tp, fontFamily: INTER }}>
+                  Custom RGB Color
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowColorPicker(false)}
+                  title="Close color picker"
+                  aria-label="Close color picker"
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: C.tm,
+                    cursor: "pointer",
+                    padding: 2,
+                    display: "flex",
+                    alignItems: "center",
+                    borderRadius: 4,
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = C.tp)}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = C.tm)}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+
+              {/* Native RGB picker swatch */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <label
+                  style={{
+                    position: "relative",
+                    width: 38,
+                    height: 38,
+                    borderRadius: 8,
+                    border: "2px solid rgba(255,255,255,0.25)",
+                    background: color,
+                    cursor: "pointer",
+                    overflow: "hidden",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                    flexShrink: 0,
+                  }}
+                  title="Click swatch to open RGB spectrum picker"
+                >
+                  <input
+                    type="color"
+                    value={to7Hex(color)}
+                    onChange={handleNativeColorChange}
+                    aria-label="Native RGB color picker"
+                    style={{
+                      position: "absolute",
+                      top: -10,
+                      left: -10,
+                      width: 60,
+                      height: 60,
+                      opacity: 0,
+                      cursor: "pointer",
+                    }}
+                  />
+                </label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 11, color: C.tp, fontFamily: MONO, fontWeight: 600 }}>
+                    {color.toUpperCase()}
+                  </span>
+                  <span style={{ fontSize: 9, color: C.tm, fontFamily: INTER }}>
+                    Click swatch for RGB picker
+                  </span>
+                </div>
+              </div>
+
+              {/* Hexadecimal input */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <label
+                  htmlFor="whiteboard-hex-input"
+                  style={{ fontSize: 10, color: C.ts, fontFamily: INTER, fontWeight: 500 }}
+                >
+                  Hex Value
+                </label>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    background: "rgba(15,23,42,0.85)",
+                    border: `1px solid ${hexError ? C.rose : C.border}`,
+                    borderRadius: 6,
+                    padding: "4px 8px",
+                    gap: 4,
+                  }}
+                >
+                  <span style={{ color: C.tm, fontSize: 11, fontFamily: MONO, userSelect: "none" }}>#</span>
+                  <input
+                    id="whiteboard-hex-input"
+                    type="text"
+                    maxLength={7}
+                    value={hexInput.startsWith("#") ? hexInput.slice(1) : hexInput}
+                    onChange={handleHexInputChange}
+                    onBlur={handleHexInputBlur}
+                    onKeyDown={handleHexInputKeyDown}
+                    placeholder="12A4F5"
+                    aria-label="Hexadecimal color input"
+                    spellCheck={false}
+                    style={{
+                      flex: 1,
+                      background: "transparent",
+                      border: "none",
+                      outline: "none",
+                      color: C.tp,
+                      fontSize: 12,
+                      fontFamily: MONO,
+                      textTransform: "uppercase",
+                      minWidth: 0,
+                    }}
+                  />
+                  <div
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: 3,
+                      background: normalizeHex(hexInput) || color,
+                      border: "1px solid rgba(255,255,255,0.2)",
+                      flexShrink: 0,
+                    }}
+                  />
+                </div>
+                {hexError && (
+                  <span style={{ fontSize: 9, color: C.rose, fontFamily: INTER }}>
+                    Invalid hex (use e.g. #12A4F5 or #FFF)
+                  </span>
+                )}
+              </div>
+
+              {/* Quick swatches */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ fontSize: 9, color: C.tm, fontFamily: INTER }}>Quick Swatches</span>
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                  {QUICK_SWATCHES.map(swatch => (
+                    <button
+                      key={swatch}
+                      type="button"
+                      onClick={() => handleSelectCustomPreset(swatch)}
+                      title={swatch}
+                      aria-label={`Select quick swatch ${swatch}`}
+                      style={{
+                        width: 18,
+                        height: 18,
+                        borderRadius: 4,
+                        background: swatch,
+                        border: `1px solid ${color.toUpperCase() === swatch.toUpperCase() ? "#fff" : "rgba(255,255,255,0.15)"}`,
+                        cursor: "pointer",
+                        padding: 0,
+                        transform: color.toUpperCase() === swatch.toUpperCase() ? "scale(1.15)" : "scale(1)",
+                        transition: "transform 0.1s",
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={{ width: 1, height: 22, background: C.border }} />
@@ -890,22 +1290,70 @@ function Whiteboard({
         {/* Stroke sizes */}
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
           {SIZES.map(s => (
-            <button key={s} onClick={() => setSize(s)} style={{
-              width: 28, height: 28, borderRadius: 7, border: `1px solid ${size === s ? C.blue + "60" : C.border}`,
-              background: size === s ? `${C.blue}20` : "rgba(255,255,255,0.04)", cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              <div style={{ width: s + 2, height: s + 2, borderRadius: "50%", background: color }} />
+            <button
+              key={s}
+              type="button"
+              onClick={() => handleSelectSize(s)}
+              title={`Preset size: ${s}px`}
+              aria-label={`Set stroke size to ${s} pixels`}
+              style={{
+                width: 28, height: 28, borderRadius: 7, border: `1px solid ${size === s ? C.blue + "60" : C.border}`,
+                background: size === s ? `${C.blue}20` : "rgba(255,255,255,0.04)", cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", padding: 0, transition: "all 0.15s",
+              }}
+            >
+              <div style={{ width: Math.min(s + 2, 18), height: Math.min(s + 2, 18), borderRadius: "50%", background: tool === "eraser" ? "#CBD5E1" : color }} />
             </button>
           ))}
+
+          {/* Compact manual pixel-size numeric input (1–100 px) */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 3,
+              background: "rgba(255,255,255,0.04)",
+              border: `1px solid ${C.border}`,
+              borderRadius: 7,
+              padding: "0 6px",
+              height: 28,
+              marginLeft: 2,
+            }}
+            title="Custom stroke & eraser size in pixels (1–100 px)"
+          >
+            <input
+              type="number"
+              min={MIN_SIZE}
+              max={MAX_SIZE}
+              step={1}
+              value={sizeInput}
+              onChange={handleSizeInputChange}
+              onBlur={handleSizeInputBlur}
+              onKeyDown={handleSizeInputKeyDown}
+              aria-label="Drawing and eraser stroke size in pixels (1 to 100)"
+              style={{
+                width: 32,
+                background: "transparent",
+                border: "none",
+                outline: "none",
+                color: C.tp,
+                fontSize: 11,
+                fontFamily: MONO,
+                textAlign: "center",
+                padding: 0,
+                MozAppearance: "textfield",
+              }}
+            />
+            <span style={{ fontSize: 10, color: C.tm, fontFamily: MONO, userSelect: "none" }}>px</span>
+          </div>
         </div>
 
         <div style={{ width: 1, height: 22, background: C.border }} />
 
-        <button onClick={undo} title="Undo" style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.04)", cursor: "pointer", color: C.ts, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <button onClick={undo} title="Undo" aria-label="Undo last action" style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.04)", cursor: "pointer", color: C.ts, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Undo2 size={13} />
         </button>
-        <button onClick={clear} title="Clear All" style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.04)", cursor: "pointer", color: C.rose, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <button onClick={clear} title="Clear All" aria-label="Clear whiteboard canvas" style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.04)", cursor: "pointer", color: C.rose, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Trash2 size={13} />
         </button>
 
@@ -913,7 +1361,7 @@ function Whiteboard({
 
         <span style={{ color: C.tm, fontSize: 10, fontFamily: MONO }}>{tool} · {size}px</span>
 
-        <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.06)", border: `1px solid ${C.border}`, borderRadius: 8, padding: "4px 10px", color: C.ts, fontSize: 11, cursor: "pointer", fontFamily: INTER, fontWeight: 500 }}>
+        <button onClick={onClose} aria-label="Close whiteboard" style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.06)", border: `1px solid ${C.border}`, borderRadius: 8, padding: "4px 10px", color: C.ts, fontSize: 11, cursor: "pointer", fontFamily: INTER, fontWeight: 500 }}>
           <X size={12} /> Close
         </button>
       </div>
@@ -1206,6 +1654,9 @@ function VideoPanel({
   isCandidate = false, userName, onLeave, raisedHands,
   onSpeakingChange,
   participants = [],
+  processedStream,
+  blurLoading = false,
+  blurError = null,
 }: {
   mic: boolean; cam: boolean; screen: boolean; handRaised: boolean; blurred: boolean; showParticipants: boolean; whiteboardActive: boolean;
   onMic: () => void; onCam: () => void; onScreen: () => void; onHand: () => void; onBlur: () => void;
@@ -1220,6 +1671,9 @@ function VideoPanel({
   raisedHands?: { candidate: boolean; interviewer: boolean };
   onSpeakingChange?: (states: { candidate: boolean; interviewer: boolean }) => void;
   participants?: RoomParticipant[];
+  processedStream?: MediaStream | null;
+  blurLoading?: boolean;
+  blurError?: string | null;
 }) {
   const screenAreaRef = useRef<HTMLDivElement>(null);
   const selfTileRef = useRef<HTMLDivElement>(null);
@@ -1227,6 +1681,7 @@ function VideoPanel({
   const screenVideoRef = useRef<HTMLVideoElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const [fullscreenElement, setFullscreenElement] = useState<Element | null>(null);
   const [isRemoteScreen, setIsRemoteScreen] = useState(false);
   const [remoteFitMode, setRemoteFitMode] = useState<"contain" | "cover" | null>(null);
@@ -1354,10 +1809,11 @@ function VideoPanel({
   }, [screenStream]);
 
   useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
+    const streamToDisplay = (blurred && processedStream) ? processedStream : localStream;
+    if (localVideoRef.current && streamToDisplay) {
+      localVideoRef.current.srcObject = streamToDisplay;
     }
-  }, [localStream, cam, screen]);
+  }, [localStream, processedStream, cam, screen, blurred]);
 
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
@@ -1368,8 +1824,23 @@ function VideoPanel({
     }
   }, [remoteStream, screen]);
 
+  // Dedicated audio element ensures remote participant's microphone audio plays continuously,
+  // even if video tiles unmount, enter screen sharing, or change display styles.
+  useEffect(() => {
+    if (remoteAudioRef.current && remoteStream) {
+      if (remoteAudioRef.current.srcObject !== remoteStream) {
+        remoteAudioRef.current.srcObject = remoteStream;
+      }
+      remoteAudioRef.current.play().catch(err => {
+        console.warn("Remote audio play() warning:", err);
+      });
+    }
+  }, [remoteStream]);
+
   return (
     <div style={{ position: "relative", height: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
+      {/* Hidden dedicated audio element guarantees remote microphone audio output is uninterrupted */}
+      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: "none" }} />
       {/* Main video area */}
       <div
         ref={screen && screenStream ? screenAreaRef : undefined}
@@ -1384,6 +1855,11 @@ function VideoPanel({
         {mediaError && (
           <div style={{ position: "absolute", top: 12, left: 12, right: 12, zIndex: 20, background: "rgba(244,63,94,0.9)", color: "#fff", padding: "8px 12px", borderRadius: 8, fontSize: 12, fontFamily: INTER }}>
             {mediaError}
+          </div>
+        )}
+        {blurError && (
+          <div style={{ position: "absolute", top: mediaError ? 54 : 12, left: 12, right: 12, zIndex: 21, background: "rgba(245,158,11,0.92)", color: "#fff", padding: "8px 12px", borderRadius: 8, fontSize: 12, fontFamily: INTER }}>
+            {blurError}
           </div>
         )}
         {screen && screenStream ? (
@@ -1529,7 +2005,7 @@ function VideoPanel({
                     height: "100%",
                   }}
                 >
-                  {p.isSelf && cam && localStream && localStream.getVideoTracks().length > 0 ? (
+                  {p.isSelf && cam && ((blurred && processedStream) ? processedStream.getVideoTracks().length > 0 : (localStream && localStream.getVideoTracks().length > 0)) ? (
                     <video
                       ref={localVideoRef}
                       autoPlay
@@ -1540,7 +2016,7 @@ function VideoPanel({
                         height: "100%",
                         objectFit: isThisFullscreen ? "contain" : "cover",
                         transform: "scaleX(-1)",
-                        filter: blurred ? "blur(4px)" : "none",
+                        filter: "none",
                         transition: "filter 0.3s",
                         background: isThisFullscreen ? "#000" : "transparent",
                       }}
@@ -1551,6 +2027,7 @@ function VideoPanel({
                         ref={remoteVideoRef}
                         autoPlay
                         playsInline
+                        muted
                         onLoadedMetadata={updateRemoteStreamType}
                         onResize={updateRemoteStreamType}
                         style={{
@@ -1579,7 +2056,7 @@ function VideoPanel({
                       display: "flex", alignItems: "center", justifyContent: "center",
                       color: "#fff", fontSize: 20, fontWeight: 700, fontFamily: INTER,
                       boxShadow: `0 8px 28px ${p.color}50`,
-                      filter: blurred && p.isSelf ? "blur(4px)" : "none",
+                      filter: "none",
                       transition: "filter 0.3s",
                     }}>{p.ini}</div>
                   )}
@@ -1605,8 +2082,21 @@ function VideoPanel({
                   {/* Top-right tile controls */}
                   <div style={{ position: "absolute", top: 10, right: 10, display: "flex", alignItems: "center", gap: 6, zIndex: 15 }}>
                     {blurred && p.isSelf && (
-                      <span style={{ background: `${C.blue}22`, border: `1px solid ${C.blue}40`, borderRadius: 8, padding: "2px 7px", fontSize: 9, color: C.blue, fontWeight: 600, fontFamily: INTER }}>
-                        Blur ON
+                      <span style={{
+                        background: `${C.blue}22`,
+                        border: `1px solid ${C.blue}40`,
+                        borderRadius: 8,
+                        padding: "2px 7px",
+                        fontSize: 9,
+                        color: C.blue,
+                        fontWeight: 600,
+                        fontFamily: INTER,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4
+                      }}>
+                        {blurLoading ? <Loader2 size={10} className="animate-spin" /> : null}
+                        {blurLoading ? "Blur Loading..." : "Blur ON"}
                       </span>
                     )}
 
@@ -1723,7 +2213,13 @@ function VideoPanel({
           title={handRaised ? "Lower your hand (hand is currently raised)" : "Raise your hand (hand is currently lowered)"}
           ariaLabel={handRaised ? "Lower hand (currently raised)" : "Raise hand (currently lowered)"}
         />
-        <CtrlBtn icon={<Blend size={16} />} label="Blur BG" active={blurred} onClick={onBlur} />
+        <CtrlBtn
+          icon={blurLoading ? <Loader2 size={16} className="animate-spin" /> : <Blend size={16} />}
+          label={blurLoading ? "Blur..." : "Blur BG"}
+          active={blurred}
+          onClick={onBlur}
+          title={blurError ? `Blur: ${blurError}` : (blurred ? "Disable background blur" : "Enable background blur")}
+        />
         <CtrlBtn icon={<PenLine size={16} />} label="Whiteboard" active={whiteboardActive} onClick={onWhiteboard} />
         <div style={{ width: 1, height: 38, background: C.border, margin: "0 4px" }} />
         <CtrlBtn icon={<Users size={16} />} label="People" badge={participants.length} active={showParticipants} onClick={onParticipants} />
@@ -1758,6 +2254,11 @@ interface CodeEditorProps {
   userRole?: string;
   isExecuting?: boolean;
   onRunCode?: (lang: SupportedInterviewLanguage, code: string) => void;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
+  onToggleCodeChat?: () => void;
+  onToggleConsole?: () => void;
+  onRegisterRunHandler?: (runner: (() => void) | null) => void;
 }
 
 function CodeEditor({
@@ -1766,6 +2267,11 @@ function CodeEditor({
   onRegisterRemoteCodeHandler,
   isExecuting = false,
   onRunCode,
+  isFullscreen = false,
+  onToggleFullscreen,
+  onToggleCodeChat,
+  onToggleConsole,
+  onRegisterRunHandler,
 }: CodeEditorProps) {
   const { roomId: paramRoomId } = useParams<{ roomId: string }>();
   const roomId = propRoomId || paramRoomId;
@@ -2081,6 +2587,21 @@ function CodeEditor({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const activeCode = codes[selectedLang] ?? INTERVIEW_STARTER_TEMPLATES[selectedLang];
+
+  useEffect(() => {
+    if (onRegisterRunHandler) {
+      onRegisterRunHandler(() => {
+        if (!isExecuting) {
+          onRunCode?.(selectedLang, activeCode);
+        }
+      });
+      return () => {
+        onRegisterRunHandler(null);
+      };
+    }
+  }, [onRegisterRunHandler, onRunCode, selectedLang, activeCode, isExecuting]);
+
   function TBtn({
     icon,
     label,
@@ -2121,8 +2642,6 @@ function CodeEditor({
       </button>
     );
   }
-
-  const activeCode = codes[selectedLang] ?? INTERVIEW_STARTER_TEMPLATES[selectedLang];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", fontFamily: INTER }}>
@@ -2212,6 +2731,12 @@ function CodeEditor({
         <div style={{ flex: 1 }} />
 
         <TBtn
+          icon={isFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+          label={isFullscreen ? "Exit Editor Fullscreen (F10)" : "Editor Fullscreen (F10)"}
+          active={isFullscreen}
+          onClick={() => onToggleFullscreen?.()}
+        />
+        <TBtn
           icon={<Map size={12} />}
           label={minimap ? "Hide Minimap" : "Show Minimap"}
           active={minimap}
@@ -2278,6 +2803,14 @@ function CodeEditor({
           onChange={handleCodeChange}
           minimap={minimap}
           wordWrap={wrap}
+          onRunCode={() => {
+            if (!isExecuting) {
+              onRunCode?.(selectedLang, activeCode);
+            }
+          }}
+          onToggleFullscreen={onToggleFullscreen}
+          onToggleCodeChat={onToggleCodeChat}
+          onToggleConsole={onToggleConsole}
         />
       </div>
     </div>
@@ -3044,7 +3577,7 @@ function ShortcutModal({ onClose }: { onClose: () => void }) {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           {SHORTCUTS.map(s => (
-            <div key={s.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 11px", borderRadius: 9, background: "rgba(255,255,255,0.03)" }}>
+            <div key={s.id || s.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 11px", borderRadius: 9, background: "rgba(255,255,255,0.03)" }}>
               <span style={{ color: C.ts, fontSize: 12 }}>{s.label}</span>
               <div style={{ display: "flex", gap: 4 }}>
                 {s.keys.map(k => (
@@ -3436,6 +3969,10 @@ export default function InterviewRoom() {
   const selfRoleKey = isCandidate ? "candidate" : "interviewer";
   const handRaised = raisedHands[selfRoleKey];
   const [blurred, setBlurred] = useState(false);
+  const [processedStream, setProcessedStream] = useState<MediaStream | null>(null);
+  const blurProcessorRef = useRef<BackgroundBlurProcessor | null>(null);
+  const [blurLoading, setBlurLoading] = useState(false);
+  const [blurError, setBlurError] = useState<string | null>(null);
   const [, setIsFullscreen] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
   const [whiteboardActive, setWhiteboardActive] = useState(false);
@@ -3446,6 +3983,13 @@ export default function InterviewRoom() {
   const [rightTab, setRightTab] = useState<"code" | "chat">("code");
   const [consoleVisible, setConsoleVisible] = useState(true);
   const [shortcutOpen, setShortcutOpen] = useState(false);
+  const [isEditorFullscreen, setIsEditorFullscreen] = useState(false);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
+  const codeEditorRunHandlerRef = useRef<(() => void) | null>(null);
+
+  const handleRegisterRunHandler = useCallback((runner: (() => void) | null) => {
+    codeEditorRunHandlerRef.current = runner;
+  }, []);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -3812,11 +4356,20 @@ export default function InterviewRoom() {
         console.warn("Could not publish leave message:", e);
       }
     }
+    if (blurProcessorRef.current) {
+      blurProcessorRef.current.stop();
+      blurProcessorRef.current = null;
+    }
+    setProcessedStream(null);
+    setBlurred(false);
+    setBlurLoading(false);
     if (screenStreamRef.current) {
       screenStreamRef.current.getTracks().forEach(t => t.stop());
       screenStreamRef.current = null;
     }
     screenStream?.getTracks().forEach(t => t.stop());
+    setScreenStream(null);
+    setScreen(false);
     localStreamRef.current?.getTracks().forEach(t => t.stop());
     if (peerConnectionRef.current) {
       peerConnectionRef.current.onicecandidate = null;
@@ -3854,11 +4407,20 @@ export default function InterviewRoom() {
             console.warn("Could not publish leave message:", e);
           }
         }
+        if (blurProcessorRef.current) {
+          blurProcessorRef.current.stop();
+          blurProcessorRef.current = null;
+        }
+        setProcessedStream(null);
+        setBlurred(false);
+        setBlurLoading(false);
         if (screenStreamRef.current) {
           screenStreamRef.current.getTracks().forEach(t => t.stop());
           screenStreamRef.current = null;
         }
         screenStream?.getTracks().forEach(t => t.stop());
+        setScreenStream(null);
+        setScreen(false);
         localStreamRef.current?.getTracks().forEach(t => t.stop());
         if (peerConnectionRef.current) {
           peerConnectionRef.current.onicecandidate = null;
@@ -3909,12 +4471,21 @@ export default function InterviewRoom() {
 
     console.info("Candidate processing remote interview completion event:", eventMsg);
 
-    // 1. Immediately stop local audio, video, and screen sharing tracks
+    // 1. Immediately stop local audio, video, blur processing, and screen sharing tracks
+    if (blurProcessorRef.current) {
+      blurProcessorRef.current.stop();
+      blurProcessorRef.current = null;
+    }
+    setProcessedStream(null);
+    setBlurred(false);
+    setBlurLoading(false);
     if (screenStreamRef.current) {
       screenStreamRef.current.getTracks().forEach(t => t.stop());
       screenStreamRef.current = null;
     }
     screenStream?.getTracks().forEach(t => t.stop());
+    setScreenStream(null);
+    setScreen(false);
     localStreamRef.current?.getTracks().forEach(t => t.stop());
 
     // 2. Close WebRTC peer connection
@@ -4008,6 +4579,13 @@ export default function InterviewRoom() {
 
     return () => {
       active = false;
+      if (blurProcessorRef.current) {
+        blurProcessorRef.current.stop();
+        blurProcessorRef.current = null;
+      }
+      setProcessedStream(null);
+      setBlurred(false);
+      setBlurLoading(false);
       screenStreamRef.current?.getTracks().forEach(t => t.stop());
       screenStreamRef.current = null;
       localStreamRef.current?.getTracks().forEach(t => t.stop());
@@ -4044,21 +4622,43 @@ export default function InterviewRoom() {
 
     pc.ontrack = (event) => {
       console.info("WebRTC ontrack received track:", event.track.kind, event.track.id);
+      let stream = remoteStreamRef.current;
+      if (!stream) {
+        stream = new MediaStream();
+        remoteStreamRef.current = stream;
+      }
+
+      // Preserve existing tracks of other kinds (e.g. microphone audio when screen video arrives)
+      const existingSameKind = stream.getTracks().find((t) => t.kind === event.track.kind);
+      if (existingSameKind && existingSameKind.id !== event.track.id) {
+        stream.removeTrack(existingSameKind);
+      }
+      if (!stream.getTracks().some((t) => t.id === event.track.id)) {
+        stream.addTrack(event.track);
+      }
+
+      // Merge any other tracks present in event.streams[0] if provided
       const incomingStream = event.streams?.[0];
       if (incomingStream) {
-        remoteStreamRef.current = incomingStream;
-        setRemoteStream(incomingStream);
-      } else {
-        let stream = remoteStreamRef.current;
-        if (!stream) {
-          stream = new MediaStream();
-          remoteStreamRef.current = stream;
-        }
-        if (!stream.getTracks().some(t => t.id === event.track.id)) {
-          stream.addTrack(event.track);
-        }
-        setRemoteStream(stream);
+        incomingStream.getTracks().forEach((track) => {
+          const existingOfKind = stream!.getTracks().find((t) => t.kind === track.kind);
+          if (existingOfKind && existingOfKind.id !== track.id) {
+            stream!.removeTrack(existingOfKind);
+          }
+          if (!stream!.getTracks().some((t) => t.id === track.id)) {
+            stream!.addTrack(track);
+          }
+        });
       }
+
+      event.track.onended = () => {
+        stream?.removeTrack(event.track);
+        if (remoteStreamRef.current) {
+          setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
+        }
+      };
+
+      setRemoteStream(new MediaStream(stream.getTracks()));
     };
 
     return () => {
@@ -4078,16 +4678,24 @@ export default function InterviewRoom() {
     const pc = peerConnectionRef.current;
     const senders = pc.getSenders();
     localStream.getTracks().forEach((track) => {
-      const alreadyAdded = senders.some((sender) => sender.track === track);
+      const alreadyAdded = senders.some((sender) =>
+        sender.track === track ||
+        (track.kind === "video" && (screenStreamRef.current !== null || sender.track?.kind === "video")) ||
+        (track.kind === "audio" && sender.track?.kind === "audio")
+      );
       if (!alreadyAdded) {
-        pc.addTrack(track, localStream);
+        const activeProcessedTrack = blurProcessorRef.current?.getProcessedStream()?.getVideoTracks()[0];
+        const trackToAdd = (track.kind === "video" && blurred && activeProcessedTrack)
+          ? activeProcessedTrack
+          : track;
+        pc.addTrack(trackToAdd, localStream);
       }
     });
 
     if (!isCandidate && hasCandidateJoinedRef.current) {
       void createAndSendOffer();
     }
-  }, [localStream, isCandidate]);
+  }, [localStream, isCandidate, blurred]);
 
   const toggleMic = () => {
     setMic(m => {
@@ -4101,8 +4709,107 @@ export default function InterviewRoom() {
     setCam(c => {
       const next = !c;
       localStreamRef.current?.getVideoTracks().forEach(t => { t.enabled = next; });
+      blurProcessorRef.current?.getProcessedStream()?.getVideoTracks().forEach(t => { t.enabled = next; });
       return next;
     });
+  };
+
+  const toggleBlur = async () => {
+    // If currently blurred, turn it off
+    if (blurred) {
+      setBlurred(false);
+      setBlurLoading(false);
+      setBlurError(null);
+      if (blurProcessorRef.current) {
+        blurProcessorRef.current.stop();
+        blurProcessorRef.current = null;
+      }
+      setProcessedStream(null);
+
+      // Restore camera track to WebRTC video sender (unless screen-sharing)
+      const pc = peerConnectionRef.current;
+      if (pc && !screenStreamRef.current) {
+        const cameraTrack = localStreamRef.current?.getVideoTracks()[0] || null;
+        const videoSender = getVideoSender(pc);
+        if (videoSender) {
+          try {
+            console.info("Restoring camera track on WebRTC video sender (blur off):", cameraTrack?.id);
+            await videoSender.replaceTrack(cameraTrack);
+          } catch (err) {
+            console.error("Error restoring camera track on WebRTC sender:", err);
+          }
+        }
+      }
+      return;
+    }
+
+    // Turn blur ON
+    const localVideoTrack = localStreamRef.current?.getVideoTracks()[0];
+    if (!localStreamRef.current || !localVideoTrack) {
+      setBlurError("Camera video track is not available");
+      return;
+    }
+
+    setBlurLoading(true);
+    setBlurError(null);
+
+    try {
+      const processor = new BackgroundBlurProcessor({
+        blurRadius: 18,
+        onError: (err) => {
+          console.warn("BackgroundBlurProcessor runtime error:", err);
+          setBlurError("Background blur encountered an issue.");
+        },
+      });
+
+      const outStream = await processor.start(localStreamRef.current);
+
+      // Ensure track enabled state matches current cam state
+      outStream.getVideoTracks().forEach(t => { t.enabled = cam; });
+
+      blurProcessorRef.current = processor;
+      setProcessedStream(outStream);
+      setBlurred(true);
+      setBlurLoading(false);
+
+      // Replace video track on WebRTC video sender (unless screen-sharing)
+      const pc = peerConnectionRef.current;
+      if (pc && !screenStreamRef.current) {
+        const processedTrack = outStream.getVideoTracks()[0] || null;
+        const videoSender = getVideoSender(pc);
+        if (videoSender && processedTrack) {
+          console.info("Replacing WebRTC video track with blurred processed track:", processedTrack.id);
+          await videoSender.replaceTrack(processedTrack);
+        } else if (!videoSender && processedTrack) {
+          console.info("Adding blurred video track to peer connection");
+          pc.addTrack(processedTrack, outStream);
+        }
+      }
+    } catch (err: any) {
+      console.error("Failed to enable background blur:", err);
+      setBlurError("Could not enable background blur. Using standard camera.");
+      setBlurred(false);
+      setBlurLoading(false);
+      if (blurProcessorRef.current) {
+        blurProcessorRef.current.stop();
+        blurProcessorRef.current = null;
+      }
+      setProcessedStream(null);
+
+      // Fallback: ensure raw camera track is restored on WebRTC sender
+      const pc = peerConnectionRef.current;
+      if (pc && !screenStreamRef.current) {
+        const cameraTrack = localStreamRef.current?.getVideoTracks()[0] || null;
+        const videoSender = getVideoSender(pc);
+        if (videoSender) {
+          try {
+            await videoSender.replaceTrack(cameraTrack);
+          } catch (restoreErr) {
+            console.error("Error restoring raw camera track after blur failure:", restoreErr);
+          }
+        }
+      }
+    }
   };
 
   useEffect(() => {
@@ -4295,7 +5002,11 @@ export default function InterviewRoom() {
                 if (currentStream) {
                   const senders = pc.getSenders();
                   currentStream.getTracks().forEach((track) => {
-                    const alreadyAdded = senders.some((sender) => sender.track === track);
+                    const alreadyAdded = senders.some((sender) =>
+                      sender.track === track ||
+                      (track.kind === "video" && (screenStreamRef.current !== null || sender.track?.kind === "video")) ||
+                      (track.kind === "audio" && sender.track?.kind === "audio")
+                    );
                     if (!alreadyAdded) {
                       console.info("Candidate attaching local track before answer:", track.kind, track.id);
                       pc.addTrack(track, currentStream);
@@ -4312,7 +5023,11 @@ export default function InterviewRoom() {
                 if (currentStream) {
                   const senders = pc.getSenders();
                   currentStream.getTracks().forEach((track) => {
-                    const alreadyAdded = senders.some((sender) => sender.track === track);
+                    const alreadyAdded = senders.some((sender) =>
+                      sender.track === track ||
+                      (track.kind === "video" && (screenStreamRef.current !== null || sender.track?.kind === "video")) ||
+                      (track.kind === "audio" && sender.track?.kind === "audio")
+                    );
                     if (!alreadyAdded) {
                       console.info("Candidate attaching local track to transceiver:", track.kind, track.id);
                       pc.addTrack(track, currentStream);
@@ -4494,34 +5209,89 @@ export default function InterviewRoom() {
       setIsFullscreen(false);
     }
   }
+
+  /* ── Code Editor Fullscreen ── */
+  const toggleEditorFullscreen = useCallback(async () => {
+    const willBeFullscreen = !isEditorFullscreen;
+    setIsEditorFullscreen(willBeFullscreen);
+    if (willBeFullscreen && rightTab !== "code") {
+      setRightTab("code");
+    }
+
+    try {
+      if (willBeFullscreen) {
+        if (editorContainerRef.current?.requestFullscreen && !document.fullscreenElement) {
+          await editorContainerRef.current.requestFullscreen();
+        }
+      } else {
+        if (document.fullscreenElement === editorContainerRef.current) {
+          await document.exitFullscreen();
+        }
+      }
+    } catch {
+      // In-app CSS fullscreen fallback handles this gracefully
+    }
+
+    setTimeout(() => {
+      window.dispatchEvent(new Event("resize"));
+    }, 50);
+  }, [isEditorFullscreen, rightTab]);
+
   useEffect(() => {
-    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    const handler = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+      if (!document.fullscreenElement && isEditorFullscreen) {
+        setIsEditorFullscreen(false);
+        setTimeout(() => {
+          window.dispatchEvent(new Event("resize"));
+        }, 50);
+      }
+    };
     document.addEventListener("fullscreenchange", handler);
     return () => document.removeEventListener("fullscreenchange", handler);
-  }, []);
+  }, [isEditorFullscreen]);
+
+  /* ── Video sender resolution helper ── */
+  const getVideoSender = (pc: RTCPeerConnection): RTCRtpSender | null => {
+    // 1. Direct match on sender's attached video track
+    const senderWithVideo = pc.getSenders().find((s) => s.track?.kind === "video");
+    if (senderWithVideo) return senderWithVideo;
+
+    // 2. Transceiver match: transceiver targeting video media line
+    const videoTransceiver = pc.getTransceivers().find(
+      (t) => t.sender.track?.kind === "video" || t.receiver.track?.kind === "video"
+    );
+    if (videoTransceiver) return videoTransceiver.sender;
+
+    // 3. Fallback: sender whose track is present and is not audio
+    const nonAudioSender = pc.getSenders().find((s) => s.track && s.track.kind !== "audio");
+    return nonAudioSender || null;
+  };
 
   /* ── Screen Share ── */
   const stopScreenShare = async () => {
+    // 1. Stop only the display-capture tracks; never stop microphone audio
     if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach(t => t.stop());
+      screenStreamRef.current.getTracks().forEach((t) => t.stop());
       screenStreamRef.current = null;
     }
     setScreenStream(null);
     setScreen(false);
 
-    // Restore camera video track on WebRTC connection
+    // 2. Restore camera or blurred video track on WebRTC video sender without renegotiation
     const pc = peerConnectionRef.current;
     if (pc) {
+      const activeProcessedTrack = blurProcessorRef.current?.getProcessedStream()?.getVideoTracks()[0];
       const cameraTrack = localStreamRef.current?.getVideoTracks()[0] || null;
-      const videoSender = pc.getSenders().find(s => s.track?.kind === "video")
-        || pc.getTransceivers().find(t => t.receiver.track?.kind === "video")?.sender;
+      const trackToRestore = (blurred && activeProcessedTrack) ? activeProcessedTrack : cameraTrack;
+      const videoSender = getVideoSender(pc);
 
       if (videoSender) {
         try {
-          console.info("Restoring camera track on WebRTC video sender:", cameraTrack ? cameraTrack.id : "null");
-          await videoSender.replaceTrack(cameraTrack);
+          console.info("Restoring camera/blur track on WebRTC video sender:", trackToRestore ? trackToRestore.id : "null");
+          await videoSender.replaceTrack(trackToRestore);
         } catch (err) {
-          console.error("Error restoring camera track on WebRTC sender:", err);
+          console.error("Error restoring track on WebRTC sender:", err);
         }
       }
     }
@@ -4538,9 +5308,16 @@ export default function InterviewRoom() {
       const screenTrack = stream.getVideoTracks()[0];
 
       if (!screenTrack) {
-        stream.getTracks().forEach(t => t.stop());
+        stream.getTracks().forEach((t) => t.stop());
         return;
       }
+
+      // If the browser captured any display audio tracks despite audio:false,
+      // stop and remove them immediately so they never replace or conflict with the microphone.
+      stream.getAudioTracks().forEach((t) => {
+        t.stop();
+        stream.removeTrack(t);
+      });
 
       screenStreamRef.current = stream;
       setScreenStream(stream);
@@ -4552,18 +5329,18 @@ export default function InterviewRoom() {
         void stopScreenShare();
       });
 
-      // Transmit screen track over WebRTC by replacing outgoing video track
+      // Transmit screen track over WebRTC by replacing ONLY the video sender's track.
+      // Microphone audio track remains attached and active on the audio sender.
       const pc = peerConnectionRef.current;
       if (pc) {
-        const videoSender = pc.getSenders().find(s => s.track?.kind === "video")
-          || pc.getTransceivers().find(t => t.receiver.track?.kind === "video")?.sender;
+        const videoSender = getVideoSender(pc);
 
         if (videoSender) {
           console.info("Replacing WebRTC video track with screen track:", screenTrack.id);
           await videoSender.replaceTrack(screenTrack);
         } else {
           console.info("No existing video sender; adding screen track to peer connection");
-          pc.addTrack(screenTrack, stream);
+          pc.addTrack(screenTrack, localStreamRef.current || stream);
         }
       }
     } catch (err) {
@@ -4574,16 +5351,85 @@ export default function InterviewRoom() {
 
   /* ── Keyboard shortcuts ── */
   useEffect(() => {
-    function handler(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key === "b") { e.preventDefault(); setRightTab(t => t === "code" ? "chat" : "code"); }
-      if ((e.ctrlKey || e.metaKey) && e.key === "j") { e.preventDefault(); setConsoleVisible(v => !v); }
-      if (e.key === "?" && !["INPUT", "TEXTAREA"].includes((e.target as HTMLElement).tagName)) setShortcutOpen(true);
-      if (e.key === "Escape") setShortcutOpen(false);
-      if (e.key === "F11") { e.preventDefault(); toggleFullscreen(); }
+    function isTypingInUnrelatedInput(e: KeyboardEvent): boolean {
+      const target = e.target as HTMLElement | null;
+      if (!target) return false;
+      if (target.closest?.(".monaco-editor")) {
+        return false;
+      }
+      const tagName = target.tagName;
+      if (tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT") {
+        return true;
+      }
+      if (target.isContentEditable) {
+        return true;
+      }
+      return false;
     }
+
+    function handler(e: KeyboardEvent) {
+      // 1. If shortcut modal is open, only handle Escape to close it
+      if (shortcutOpen) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setShortcutOpen(false);
+        }
+        return;
+      }
+
+      // 2. Escape when modal is closed: exit editor fullscreen if active
+      if (e.key === "Escape") {
+        if (isEditorFullscreen) {
+          e.preventDefault();
+          void toggleEditorFullscreen();
+        }
+        return;
+      }
+
+      // 3. '?' opens shortcut modal (when not typing in an input/textarea)
+      if (e.key === "?" && !isTypingInUnrelatedInput(e)) {
+        e.preventDefault();
+        setShortcutOpen(true);
+        return;
+      }
+
+      // 4. Do not trigger global shortcuts if typing into unrelated inputs (chat, whiteboard, etc.)
+      if (isTypingInUnrelatedInput(e)) {
+        return;
+      }
+
+      // 5. Code Editor Fullscreen: F10 or Alt+F11
+      if (e.key === "F10" || (e.altKey && e.key === "F11")) {
+        e.preventDefault();
+        void toggleEditorFullscreen();
+        return;
+      }
+
+      // 6. Toggle Code / Chat: Ctrl + B
+      if ((e.ctrlKey || e.metaKey) && (e.key === "b" || e.key === "B")) {
+        e.preventDefault();
+        setRightTab((t) => (t === "code" ? "chat" : "code"));
+        return;
+      }
+
+      // 7. Toggle Console: Ctrl + J
+      if ((e.ctrlKey || e.metaKey) && (e.key === "j" || e.key === "J")) {
+        e.preventDefault();
+        setConsoleVisible((v) => !v);
+        return;
+      }
+
+      // 8. Run Code: Ctrl + Enter (outside editor focus)
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        codeEditorRunHandlerRef.current?.();
+        return;
+      }
+    }
+
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [screen, screenStream]);
+  }, [shortcutOpen, isEditorFullscreen, toggleEditorFullscreen]);
 
   const tabBtn = (id: "code" | "chat", icon: React.ReactNode, label: string) => {
     const active = rightTab === id;
@@ -4928,7 +5774,7 @@ export default function InterviewRoom() {
               onMic={toggleMic} onCam={toggleCam}
               onScreen={toggleScreenShare}
               onHand={handleToggleHand}
-              onBlur={() => setBlurred(!blurred)}
+              onBlur={toggleBlur}
               onFullscreen={toggleFullscreen}
               onParticipants={() => setShowParticipants(!showParticipants)}
               onWhiteboard={() => setWhiteboardActive(!whiteboardActive)}
@@ -4942,6 +5788,9 @@ export default function InterviewRoom() {
               raisedHands={raisedHands}
               onSpeakingChange={setSpeakingStates}
               participants={participantsList}
+              processedStream={processedStream}
+              blurLoading={blurLoading}
+              blurError={blurError}
             />
             {showParticipants && (
               <ParticipantsSidebar
@@ -4975,7 +5824,18 @@ export default function InterviewRoom() {
                 )}
               </div>
               <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-                <div style={{ display: !whiteboardActive && rightTab === "code" ? "block" : "none", height: "100%", width: "100%" }}>
+                <div
+                  ref={editorContainerRef}
+                  style={{
+                    display: !whiteboardActive && (rightTab === "code" || isEditorFullscreen) ? "block" : "none",
+                    position: isEditorFullscreen ? "fixed" : "relative",
+                    inset: isEditorFullscreen ? 0 : undefined,
+                    zIndex: isEditorFullscreen ? 80 : undefined,
+                    height: "100%",
+                    width: "100%",
+                    background: isEditorFullscreen ? C.bg : "transparent",
+                  }}
+                >
                   <CodeEditor
                     roomId={roomId}
                     stompClientRef={stompClientRef}
@@ -4984,9 +5844,14 @@ export default function InterviewRoom() {
                     userRole={effectiveRole}
                     isExecuting={isExecuting}
                     onRunCode={handleRunCode}
+                    isFullscreen={isEditorFullscreen}
+                    onToggleFullscreen={toggleEditorFullscreen}
+                    onToggleCodeChat={() => setRightTab(t => t === "code" ? "chat" : "code")}
+                    onToggleConsole={() => setConsoleVisible(v => !v)}
+                    onRegisterRunHandler={handleRegisterRunHandler}
                   />
                 </div>
-                <div style={{ display: !whiteboardActive && rightTab === "chat" ? "block" : "none", height: "100%", width: "100%" }}>
+                <div style={{ display: !whiteboardActive && rightTab === "chat" && !isEditorFullscreen ? "block" : "none", height: "100%", width: "100%" }}>
                   <ChatPanel
                     roomId={roomId}
                     stompClientRef={stompClientRef}

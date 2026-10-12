@@ -43,4 +43,6 @@ public class User {
     private List<String> skills = new ArrayList<>();
     // Targets
     private List<String> targets = new ArrayList<>();
+    // Experience
+    private List<Experience> experience = new ArrayList<>();
 }

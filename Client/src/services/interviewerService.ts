@@ -34,7 +34,7 @@ export interface InterviewerProfile {
   role?: string;
   title?: string;
   location?: string;
-  avatar?: string;
+  avatar?: string | null;
   about?: string;
 }
 
@@ -47,6 +47,22 @@ export const updateInterviewerProfile = async (
   data: Partial<InterviewerProfile>
 ): Promise<InterviewerProfile> => {
   const response = await API.put("/user/me", data);
+  return response.data;
+};
+
+export const uploadInterviewerAvatarApi = async (file: File): Promise<InterviewerProfile> => {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await API.post("/user/avatar", formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+  });
+  return response.data;
+};
+
+export const removeInterviewerAvatarApi = async (): Promise<InterviewerProfile> => {
+  const response = await API.delete("/user/avatar");
   return response.data;
 };
 

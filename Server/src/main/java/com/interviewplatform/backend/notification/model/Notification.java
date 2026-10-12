@@ -23,6 +23,8 @@ public class Notification {
 
     private String roomId;
 
+    private String interviewTitle;
+
     private boolean read;
 
     private LocalDateTime createdAt;
@@ -38,12 +40,25 @@ public class Notification {
             String relatedInterviewId,
             String roomId
     ) {
+        this(recipientUserId, type, title, message, relatedInterviewId, roomId, null);
+    }
+
+    public Notification(
+            String recipientUserId,
+            NotificationType type,
+            String title,
+            String message,
+            String relatedInterviewId,
+            String roomId,
+            String interviewTitle
+    ) {
         this.recipientUserId = recipientUserId;
         this.type = type;
         this.title = title;
         this.message = message;
         this.relatedInterviewId = relatedInterviewId;
         this.roomId = roomId;
+        this.interviewTitle = interviewTitle;
         this.read = false;
         this.createdAt = LocalDateTime.now();
     }
@@ -102,6 +117,14 @@ public class Notification {
 
     public void setRoomId(String roomId) {
         this.roomId = roomId;
+    }
+
+    public String getInterviewTitle() {
+        return interviewTitle;
+    }
+
+    public void setInterviewTitle(String interviewTitle) {
+        this.interviewTitle = interviewTitle;
     }
 
     public boolean isRead() {

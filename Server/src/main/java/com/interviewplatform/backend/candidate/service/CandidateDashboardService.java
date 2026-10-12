@@ -227,9 +227,8 @@ public class CandidateDashboardService {
             response.setLastMockResult(new RecentSessionResponse());
         }
 
-        // Empty Lists
-        response.setRooms(new ArrayList<>());
-        response.setExperience(new ArrayList<>());
+        // Dynamic Experience
+        response.setExperience((java.util.List) (user.getExperience() != null ? user.getExperience() : new ArrayList<>()));
 
         // Dynamic Skills
         response.setSkills(user.getSkills());

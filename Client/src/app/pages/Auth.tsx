@@ -18,6 +18,7 @@ export default function Auth() {
   const [showPass, setShowPass] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [agreedToTerms, setAgreedToTerms] = useState(true);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -35,6 +36,9 @@ export default function Auth() {
   const handleTabChange = (newTab: Tab) => {
     setTab(newTab);
     setSuccessMessage("");
+    if (newTab === "signup") {
+      setAgreedToTerms(true);
+    }
   };
 
   const roleLabel = role === "interviewer" ? "Interviewer" : "Candidate";
@@ -74,6 +78,7 @@ export default function Auth() {
           name: response.data?.name,
           email: response.data?.email,
           role: response.data?.role ? String(response.data.role).toLowerCase().replace(/^role_/, "") : role,
+          avatar: response.data?.avatar || null,
         };
         localStorage.setItem(
           "user",
@@ -436,9 +441,11 @@ export default function Auth() {
                 <input
                   type="checkbox"
                   id="terms"
-                  className="mt-0.5 w-4 h-4 rounded border-[#0d1b2a]/20 accent-[#00bfa6]"
+                  checked={agreedToTerms}
+                  onChange={(e) => setAgreedToTerms(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-[#0d1b2a]/20 accent-[#00bfa6] cursor-pointer"
                 />
-                <label htmlFor="terms" className="text-[#4a6080] text-xs leading-relaxed">
+                <label htmlFor="terms" className="text-[#4a6080] text-xs leading-relaxed cursor-pointer select-none">
                   I agree to the{" "}
                   <a href="#" className="text-[#00bfa6] hover:underline">Terms of Service</a>
                   {" "}and{" "}

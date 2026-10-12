@@ -7,6 +7,7 @@ import com.interviewplatform.backend.candidate.dto.profile.TargetResponse;
 import com.interviewplatform.backend.candidate.service.CandidateProfileService;
 import com.interviewplatform.backend.dto.UpdateUserRequest;
 import com.interviewplatform.backend.dto.UserResponse;
+import com.interviewplatform.backend.service.AvatarService;
 import com.interviewplatform.backend.service.UserService;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,14 +20,17 @@ public class CandidateProfileController {
 
     // Candidate Profile Service
     private final CandidateProfileService candidateProfileService;
+    private final AvatarService avatarService;
 
     // Constructor
     public CandidateProfileController(
             UserService userService,
-            CandidateProfileService candidateProfileService
+            CandidateProfileService candidateProfileService,
+            AvatarService avatarService
     ) {
         this.userService = userService;
         this.candidateProfileService = candidateProfileService;
+        this.avatarService = avatarService;
     }
 
     // Update Profile
@@ -35,6 +39,40 @@ public class CandidateProfileController {
             @RequestBody UpdateUserRequest request
     ) {
         return userService.updateProfile(request);
+    }
+
+    // Upload Candidate Avatar
+    @PostMapping(value = "/avatar", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    public UserResponse uploadAvatar(@RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+        com.interviewplatform.backend.model.User user = userService.getLoggedInUser();
+        com.interviewplatform.backend.model.User updatedUser = avatarService.uploadAvatar(user, file);
+        return new UserResponse(
+                updatedUser.getId(),
+                updatedUser.getName(),
+                updatedUser.getEmail(),
+                updatedUser.getRole(),
+                updatedUser.getTitle(),
+                updatedUser.getLocation(),
+                updatedUser.getAvatar(),
+                updatedUser.getAbout()
+        );
+    }
+
+    // Remove Candidate Avatar
+    @DeleteMapping("/avatar")
+    public UserResponse removeAvatar() {
+        com.interviewplatform.backend.model.User user = userService.getLoggedInUser();
+        com.interviewplatform.backend.model.User updatedUser = avatarService.removeAvatar(user);
+        return new UserResponse(
+                updatedUser.getId(),
+                updatedUser.getName(),
+                updatedUser.getEmail(),
+                updatedUser.getRole(),
+                updatedUser.getTitle(),
+                updatedUser.getLocation(),
+                updatedUser.getAvatar(),
+                updatedUser.getAbout()
+        );
     }
 
     // Add Skill

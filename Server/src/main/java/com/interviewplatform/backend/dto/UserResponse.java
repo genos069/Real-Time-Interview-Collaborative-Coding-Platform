@@ -18,6 +18,10 @@ public class UserResponse {
 
     private String about;
 
+    private java.util.List<String> skills;
+    private java.util.List<String> targets;
+    private java.util.List<com.interviewplatform.backend.model.Experience> experience;
+
     public UserResponse() {
     }
 
@@ -31,6 +35,22 @@ public class UserResponse {
             String avatar,
             String about
     ) {
+        this(id, name, email, role, title, location, avatar, about, null, null, null);
+    }
+
+    public UserResponse(
+            String id,
+            String name,
+            String email,
+            String role,
+            String title,
+            String location,
+            String avatar,
+            String about,
+            java.util.List<String> skills,
+            java.util.List<String> targets,
+            java.util.List<com.interviewplatform.backend.model.Experience> experience
+    ) {
         this.id = id;
         this.name = name;
         this.email = email;
@@ -39,6 +59,9 @@ public class UserResponse {
         this.location = location;
         this.avatar = avatar;
         this.about = about;
+        this.skills = skills;
+        this.targets = targets;
+        this.experience = experience;
     }
 
     public String getId() {
@@ -103,5 +126,29 @@ public class UserResponse {
 
     public void setAbout(String about) {
         this.about = about;
+    }
+
+    public java.util.List<String> getSkills() {
+        return skills;
+    }
+
+    public void setSkills(java.util.List<String> skills) {
+        this.skills = skills;
+    }
+
+    public java.util.List<String> getTargets() {
+        return targets;
+    }
+
+    public void setTargets(java.util.List<String> targets) {
+        this.targets = targets;
+    }
+
+    public java.util.List<com.interviewplatform.backend.model.Experience> getExperience() {
+        return experience;
+    }
+
+    public void setExperience(java.util.List<com.interviewplatform.backend.model.Experience> experience) {
+        this.experience = experience;
     }
 }
